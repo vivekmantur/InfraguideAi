@@ -1,9 +1,11 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
-import { ArrowDownToLine, CloudCog, FileText, GitBranch, Loader2, Route, ServerCog } from "lucide-react";
+import { ArrowDownToLine, CloudCog, FileText, FolderOpen, GitBranch, Loader2, Route, ServerCog, X } from "lucide-react";
 import "./styles.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8001";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
+const IGNORED_UPLOAD_PARTS = new Set([".git", "node_modules", "vendor", "bin", "obj", "dist", "build", ".venv", "venv", "env", "__pycache__"]);
 
 type Requirements = {
   cloud_provider: string;
@@ -21,6 +23,7 @@ type ServiceRecommendation = {
 
 type Assessment = {
   technology_stack: {
+    project_summary?: string;
     languages?: string[];
     frameworks?: string[];
     runtimes?: string[];
@@ -77,7 +80,11 @@ const options = {
 };
 
 function App() {
-  const [repositoryUrl, setRepositoryUrl] = React.useState("https://github.com/company/ecommerce-app");
+  const [sourceMode, setSourceMode] = React.useState<"github" | "folder">("github");
+  const [repositoryUrl, setRepositoryUrl] = React.useState("");
+  const [githubToken, setGithubToken] = React.useState("");
+  const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
+  const folderInputRef = React.useRef<HTMLInputElement | null>(null);
   const [requirements, setRequirements] = React.useState<Requirements>({
     cloud_provider: "No Preference",
     migration_goal: "Application Modernization",
@@ -87,6 +94,7 @@ function App() {
   });
   const [assessment, setAssessment] = React.useState<Assessment | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
+  const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
   const [error, setError] = React.useState("");
 
   async function submitAssessment(event: React.FormEvent<HTMLFormElement>) {
@@ -95,20 +103,23 @@ function App() {
     setError("");
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/assessments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          repository_url: repositoryUrl,
-          requirements,
-        }),
-      });
+      const response = sourceMode === "github" ? await submitGithubAssessment() : await submitFolderAssessment();
 
       if (!response.ok) {
-        throw new Error(`Assessment failed with status ${response.status}`);
+        throw new Error(await responseErrorMessage(response));
       }
 
-      setAssessment(await response.json());
+      const nextAssessment = await response.json() as Assessment;
+      if (sourceMode === "github" && !githubToken.trim() && hasRepositoryCloneFailure(nextAssessment)) {
+        setAssessment(null);
+        setIsTokenModalOpen(true);
+        return;
+      }
+      if (sourceMode === "github" && githubToken.trim() && hasRepositoryCloneFailure(nextAssessment)) {
+        throw new Error("GitHub clone failed. Check that the repository URL is correct and the access token has read access.");
+      }
+
+      setAssessment(nextAssessment);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Assessment failed");
     } finally {
@@ -116,9 +127,96 @@ function App() {
     }
   }
 
+  async function submitGithubAssessment(tokenOverride = githubToken) {
+    const trimmedUrl = repositoryUrl.trim();
+    if (!trimmedUrl) {
+      throw new Error("Enter a GitHub repository URL before generating a blueprint.");
+    }
+    if (!/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/?$/.test(trimmedUrl)) {
+      throw new Error("Enter a valid GitHub repository URL, for example https://github.com/owner/repository.");
+    }
+
+    return fetch(`${API_BASE_URL}/assessments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        repository_url: trimmedUrl,
+        github_token: tokenOverride.trim() || undefined,
+        requirements,
+      }),
+    });
+  }
+
+  async function submitPrivateRepositoryToken(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const token = githubToken.trim();
+    if (!token) {
+      setError("Enter a GitHub access token to analyze this private repository.");
+      return;
+    }
+
+    setIsLoading(true);
+    setError("");
+
+    try {
+      const response = await submitGithubAssessment(token);
+      if (!response.ok) {
+        throw new Error(await responseErrorMessage(response));
+      }
+
+      const nextAssessment = await response.json() as Assessment;
+      if (hasRepositoryCloneFailure(nextAssessment)) {
+        throw new Error("GitHub clone failed. Check that the access token has read access to this repository.");
+      }
+
+      setAssessment(nextAssessment);
+      setIsTokenModalOpen(false);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Private repository assessment failed");
+    } finally {
+      setIsLoading(false);
+    }
+  }
+
+  async function submitFolderAssessment() {
+    if (selectedFiles.length === 0) {
+      throw new Error("Select a project folder before generating a blueprint.");
+    }
+
+    const uploadFiles = analyzableFiles(selectedFiles);
+    if (uploadFiles.length === 0) {
+      throw new Error("No analyzable files found. Choose the project source folder, not only dependency or build output folders.");
+    }
+    const totalBytes = uploadFiles.reduce((sum, file) => sum + file.size, 0);
+    if (totalBytes > MAX_UPLOAD_BYTES) {
+      throw new Error("Uploaded source files are too large for this MVP scan.");
+    }
+
+    const formData = new FormData();
+    formData.append("requirements", JSON.stringify(requirements));
+    formData.append("project_name", uploadFiles[0].webkitRelativePath?.split("/")[0] || "Uploaded folder");
+    for (const file of uploadFiles) {
+      formData.append("files", file, file.webkitRelativePath || file.name);
+    }
+
+    return fetch(`${API_BASE_URL}/assessments/upload`, {
+      method: "POST",
+      body: formData,
+    });
+  }
+
   function updateRequirement(key: keyof Requirements, value: string) {
     setRequirements((current) => ({ ...current, [key]: value }));
   }
+
+  function clearSelectedFolder() {
+    setSelectedFiles([]);
+    if (folderInputRef.current) {
+      folderInputRef.current.value = "";
+    }
+  }
+
+  const uploadableFiles = React.useMemo(() => analyzableFiles(selectedFiles), [selectedFiles]);
 
   function downloadBlueprint() {
     if (!assessment) return;
@@ -156,18 +254,56 @@ function App() {
       <section className="mx-auto grid max-w-7xl gap-5 px-5 py-5 lg:grid-cols-[420px_minmax(0,1fr)]">
         <form onSubmit={submitAssessment} className="rounded-lg border border-ink/10 bg-white p-5 shadow-panel">
           <div className="mb-5 flex items-center gap-2">
-            <GitBranch size={20} className="text-signal" />
+            {sourceMode === "github" ? <GitBranch size={20} className="text-signal" /> : <FolderOpen size={20} className="text-signal" />}
             <h2 className="text-xl font-semibold">Migration Input</h2>
           </div>
 
-          <label className="field-label" htmlFor="repositoryUrl">GitHub Repository</label>
-          <input
-            id="repositoryUrl"
-            className="input"
-            value={repositoryUrl}
-            onChange={(event) => setRepositoryUrl(event.target.value)}
-            placeholder="https://github.com/company/ecommerce-app"
-          />
+          <div className="mb-5 grid grid-cols-2 rounded-md border border-ink/10 bg-cloud p-1">
+            <button type="button" className={`source-tab ${sourceMode === "github" ? "source-tab-active" : ""}`} onClick={() => setSourceMode("github")}>
+              GitHub URL
+            </button>
+            <button type="button" className={`source-tab ${sourceMode === "folder" ? "source-tab-active" : ""}`} onClick={() => setSourceMode("folder")}>
+              Upload Folder
+            </button>
+          </div>
+
+          {sourceMode === "github" ? (
+            <>
+              <label className="field-label" htmlFor="repositoryUrl">GitHub Repository</label>
+              <input
+                id="repositoryUrl"
+                className="input"
+                value={repositoryUrl}
+                onChange={(event) => setRepositoryUrl(event.target.value)}
+                placeholder="https://github.com/company/ecommerce-app"
+                required
+              />
+            </>
+          ) : (
+            <label>
+              <span className="field-label">Project Folder</span>
+              <input
+                ref={folderInputRef}
+                className="input file-input"
+                type="file"
+                multiple
+                onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+                {...{ webkitdirectory: "", directory: "" }}
+              />
+              {selectedFiles.length > 0 ? (
+                <span className="mt-2 flex items-center justify-between gap-3 rounded-md bg-cloud px-3 py-2 text-sm text-ink/70">
+                  <span>
+                    {selectedFiles.length} files selected, {uploadableFiles.length} source/config files will be analyzed from {selectedFiles[0].webkitRelativePath?.split("/")[0] || "folder"}.
+                  </span>
+                  <button type="button" className="clear-folder-button" onClick={clearSelectedFolder} aria-label="Remove selected folder">
+                    <X size={16} />
+                  </button>
+                </span>
+              ) : (
+                <span className="mt-2 block text-sm text-ink/60">Choose a local project folder to scan.</span>
+              )}
+            </label>
+          )}
 
           <div className="mt-5 grid gap-4">
             <Select label="Cloud Provider" value={requirements.cloud_provider} values={options.cloud_provider} onChange={(value) => updateRequirement("cloud_provider", value)} />
@@ -177,7 +313,7 @@ function App() {
             <Select label="Migration Timeline" value={requirements.migration_timeline} values={options.migration_timeline} onChange={(value) => updateRequirement("migration_timeline", value)} />
           </div>
 
-          <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-moss px-4 py-3 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoading}>
+          <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-moss px-4 py-3 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoading || (sourceMode === "folder" && selectedFiles.length === 0) || (sourceMode === "github" && !repositoryUrl.trim())}>
             {isLoading ? <Loader2 className="animate-spin" size={18} /> : <ServerCog size={18} />}
             Generate Blueprint
           </button>
@@ -199,6 +335,62 @@ function App() {
           )}
         </section>
       </section>
+
+      {isTokenModalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <section className="modal-panel" role="dialog" aria-modal="true" aria-labelledby="privateRepoTitle">
+            <div className="mb-4 flex items-start justify-between gap-4">
+              <div>
+                <h2 id="privateRepoTitle" className="text-xl font-semibold">Private GitHub Repository</h2>
+                <p className="mt-2 text-sm leading-6 text-ink/70">
+                  This GitHub URL is private or cannot be accessed publicly. Please provide an access token to continue.
+                </p>
+              </div>
+              <button type="button" className="clear-folder-button" onClick={() => setIsTokenModalOpen(false)} aria-label="Close access token dialog">
+                <X size={16} />
+              </button>
+            </div>
+
+            <form onSubmit={submitPrivateRepositoryToken}>
+              <label htmlFor="modalGithubToken">
+                <span className="field-label">Access Token</span>
+                <input
+                  id="modalGithubToken"
+                  className="input"
+                  value={githubToken}
+                  onChange={(event) => setGithubToken(event.target.value)}
+                  placeholder="Paste GitHub access token"
+                  type="password"
+                  autoComplete="off"
+                />
+              </label>
+
+              <div className="mt-4 rounded-md bg-cloud p-3 text-xs leading-5 text-ink/65">
+                <p className="font-semibold text-ink/75">Steps to get an access token:</p>
+                <ol className="mt-2 list-decimal space-y-1 pl-4">
+                  <li>Open GitHub Settings, then Developer settings.</li>
+                  <li>Go to Personal access tokens and create a fine-grained token.</li>
+                  <li>Select the private repository you want to analyze.</li>
+                  <li>Give read-only access to repository contents and metadata.</li>
+                  <li>Generate the token, copy it, and paste it here.</li>
+                </ol>
+              </div>
+
+              {error && <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
+
+              <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:justify-end">
+                <button type="button" className="rounded-md border border-ink/15 px-4 py-2 font-semibold text-ink/70 transition hover:bg-cloud" onClick={() => setIsTokenModalOpen(false)}>
+                  Cancel
+                </button>
+                <button className="flex items-center justify-center gap-2 rounded-md bg-moss px-4 py-2 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoading || !githubToken.trim()}>
+                  {isLoading ? <Loader2 className="animate-spin" size={18} /> : <GitBranch size={18} />}
+                  Submit Token
+                </button>
+              </div>
+            </form>
+          </section>
+        </div>
+      )}
     </main>
   );
 }
@@ -250,6 +442,7 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
       <div className="grid gap-4 xl:grid-cols-2">
         <Panel title="Technology Stack">
           <KeyValue label="Languages" value={list(assessment.technology_stack.languages)} />
+          <KeyValue label="Summary" value={assessment.technology_stack.project_summary ?? assessment.architecture_summary} />
           <KeyValue label="Frameworks" value={list(assessment.technology_stack.frameworks)} />
           <KeyValue label="Runtime" value={list(assessment.technology_stack.runtimes)} />
           <KeyValue label="Hosting" value={assessment.technology_stack.hosting_model ?? "Not detected"} />
@@ -361,6 +554,30 @@ function List({ items = [], numbered = false }: { items?: string[]; numbered?: b
 
 function list(items?: string[]) {
   return items?.length ? items.join(", ") : "Not detected";
+}
+
+function analyzableFiles(files: File[]) {
+  return files.filter((file) => {
+    const path = file.webkitRelativePath || file.name;
+    const parts = path.split(/[\\/]/);
+    return !parts.some((part) => IGNORED_UPLOAD_PARTS.has(part));
+  });
+}
+
+function hasRepositoryCloneFailure(assessment: Assessment) {
+  return assessment.warnings?.some((warning) => warning.toLowerCase().startsWith("repository clone failed:")) ?? false;
+}
+
+async function responseErrorMessage(response: Response) {
+  try {
+    const data = await response.json();
+    if (typeof data.detail === "string") {
+      return data.detail;
+    }
+  } catch {
+    // Fall through to the generic status message.
+  }
+  return `Assessment failed with status ${response.status}`;
 }
 
 class ErrorBoundary extends React.Component<{ children: React.ReactNode }, { error: string }> {

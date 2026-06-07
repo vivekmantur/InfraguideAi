@@ -1,87 +1,168 @@
 from __future__ import annotations
 
 import json
-import os
-from pathlib import Path
 import re
 from typing import Any
 
 import httpx
-from dotenv import load_dotenv
 
-from .models import AssessmentResponse, ChatMessage, RepositoryAnalysis
-
-GROQ_ENDPOINT = "https://api.groq.com/openai/v1/chat/completions"
-DEFAULT_MODEL = "llama-3.3-70b-versatile"
-BACKEND_ENV = Path(__file__).resolve().parents[1] / ".env"
-
-load_dotenv(BACKEND_ENV)
+from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_ENDPOINT
+from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, MigrationRequirements, RepositoryAnalysis,MigrationStrategyResult
 
 
 def groq_model() -> str:
-    return os.getenv("GROQ_MODEL", DEFAULT_MODEL)
+    return DEFAULT_MODEL
 
 
 def is_groq_configured() -> bool:
-    return bool(os.getenv("GROQ_API_KEY"))
+    return bool(GROQ_API_KEY)
 
 
 def analyze_repository_evidence(
-    repository_url: str,
-    detected_files: list[str],
-    evidence: list[dict[str, str]],
+    fallback: RepositoryAnalysis,
+    requirements: MigrationRequirements
 ) -> tuple[RepositoryAnalysis, list[str]]:
     warnings: list[str] = []
+
     if not is_groq_configured():
-        warnings.append("Groq is not configured. Add GROQ_API_KEY to backend/.env for LLM repository analysis.")
-        return _empty_repository_analysis(detected_files), warnings
+        warnings.append(
+            "Groq is not configured. Add GROQ_API_KEY to backend/.env for LLM repository analysis."
+        )
+        return fallback, warnings
 
-    schema = RepositoryAnalysis.model_json_schema()
     prompt = f"""
-You are an expert cloud migration discovery engine. Analyze the repository evidence and infer the application architecture.
+Repository Facts:
 
-Repository URL:
-{repository_url}
+{json.dumps(fallback.model_dump(), indent=2)}
 
-Detected file paths:
-{json.dumps(detected_files[:200], indent=2)}
+Migration Requirements:
 
-Repository evidence:
-{json.dumps(evidence, indent=2)}
+Cloud Provider: {requirements.cloud_provider}
+Traffic: {requirements.expected_traffic}
+Budget: {requirements.budget_preference}
+Goal: {requirements.migration_goal}
+Timeline: {requirements.migration_timeline}
 
-Return ONLY valid JSON matching this schema:
-{json.dumps(schema, indent=2)}
+Based ONLY on the facts above determine:
 
-Rules:
-- Do not invent technologies that are not supported by file names, manifests, imports, config, bindings, or code evidence.
-- Prefer precise cloud/runtime terms, for example Azure Functions, Python 3.11, HTTP Trigger, Timer Trigger, Azure Function App.
-- If evidence is weak, use empty arrays and "Unknown" rather than guessing.
-- external_dependencies means third-party services or APIs, not package libraries.
-- dependency_graph must include separate edges for confirmed runtime, framework, trigger, cloud service, database, storage, package manager, and external API dependencies.
-- governance_findings should include security risks found from evidence, but do not quote secret values.
-- dependency_graph should use concise edges like "Application -> Azure Functions Runtime".
+1. Improved project summary
+2. Architecture pattern
+3. Governance findings
+4. Migration complexity
+
+Additionally estimate cloud sizing requirements.
+
+Sizing Rules:
+
+- Small utility/service applications:
+  CPU: 2-4 cores
+  Memory: 4-8 GB
+
+- Medium web APIs:
+  CPU: 4-8 cores
+  Memory: 8-16 GB
+
+- Enterprise APIs / Microservices:
+  CPU: 8-16 cores
+  Memory: 16-32 GB
+
+- If database size is unknown:
+  estimate conservatively.
+
+- If traffic is low:
+  smaller sizing.
+
+- If traffic is medium:
+  medium sizing.
+
+- If traffic is high:
+  larger sizing.
+
+Do not guess aggressively.
+Use confidence = Low, Medium, or High.
+
+Do not infer containerization unless Docker, Kubernetes,
+Container Apps, AKS, ECS, EKS, Cloud Run, or container
+artifacts are detected.
+
+Return JSON:
+{{
+  "project_summary": "",
+  "architecture_pattern": "",
+  "governance_findings": [],
+  "migration_complexity": "",
+
+  "cloud_sizing": {{
+    "application_type": "",
+    "cpu_cores": 0,
+    "memory_gb": 0,
+    "storage_gb": 0,
+    "database_type": "",
+    "database_size_gb": 0,
+    "requires_load_balancer": false,
+    "requires_containerization": false,
+    "confidence": ""
+  }}
+}}
 """
+
+    print("Prompt size:", len(prompt))
+    print(json.dumps(fallback.model_dump(), indent=2))
 
     raw = _chat_completion(
         [
-            {"role": "system", "content": "You return strict JSON for repository architecture analysis. No markdown."},
-            {"role": "user", "content": prompt},
+            {
+                "role": "system",
+                "content": "You return strict JSON only. No markdown.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
         ],
         fallback="{}",
         temperature=0.1,
-        max_tokens=2200,
+        max_tokens=1000,
         response_format={"type": "json_object"},
     )
 
-    try:
-        data = json.loads(_json_payload(raw))
-        if not data.get("detected_files"):
-            data["detected_files"] = detected_files[:80]
-        return RepositoryAnalysis.model_validate(data), warnings
-    except Exception as exc:
-        warnings.append(f"LLM repository analysis failed: {exc}")
-        return _empty_repository_analysis(detected_files), warnings
+    print("LLM Content:", raw)
 
+    try:
+        data = _load_json_object(raw)       
+
+        print("PARSED JSON")
+        print(json.dumps(data, indent=2))
+
+        if not data:
+            warnings.append(
+                "LLM repository analysis returned an empty response. Using local repository analysis."
+            )
+            return fallback, warnings
+
+        merged = fallback.model_copy(deep=True)
+
+        if data.get("project_summary"):
+            merged.project_summary = data["project_summary"]
+
+        if data.get("architecture_pattern"):
+            merged.architecture_pattern = data["architecture_pattern"]
+
+        if data.get("governance_findings"):
+            merged.governance_findings = data["governance_findings"]
+
+        if data.get("cloud_sizing"):
+            merged.cloud_sizing = CloudSizingRequirements.model_validate(
+                data["cloud_sizing"]
+            )
+
+        return merged, warnings
+
+    except Exception as exc:
+        warnings.append(
+            f"LLM repository analysis failed: {exc}. Raw response preview: {_safe_preview(raw)}"
+        )
+        return fallback, warnings
 
 def generate_architect_reasoning(
     analysis: RepositoryAnalysis,
@@ -89,6 +170,7 @@ def generate_architect_reasoning(
     services: list[dict[str, str]],
     cost: dict[str, Any],
     roadmap: list[str],
+    strategy: MigrationStrategyResult
 ) -> str:
     fallback = _fallback_reasoning(analysis, provider)
     if not is_groq_configured():
@@ -110,12 +192,41 @@ Discovered application:
 - Stateful services: {', '.join(analysis.stateful_services) or 'None detected'}
 - Governance findings: {', '.join(analysis.governance_findings) or 'None detected'}
 
+Cloud Sizing:
+- CPU Cores: {analysis.cloud_sizing.cpu_cores if analysis.cloud_sizing else "Unknown"}
+- Memory: {analysis.cloud_sizing.memory_gb if analysis.cloud_sizing else "Unknown"} GB
+- Storage: {analysis.cloud_sizing.storage_gb if analysis.cloud_sizing else "Unknown"} GB
+- Load Balancer: {analysis.cloud_sizing.requires_load_balancer if analysis.cloud_sizing else "Unknown"}
+- Containerization: {analysis.cloud_sizing.requires_containerization if analysis.cloud_sizing else "Unknown"}
+
+Recommended Migration Strategy:
+- Strategy: {strategy.strategy}
+- Confidence: {strategy.confidence}
+
+Evidence:
+{chr(10).join(f"- {r}" for r in strategy.reasons)}
+
 Recommended provider: {provider}
 Recommended services: {services}
 Cost estimate: {cost}
 Roadmap: {roadmap}
 
-Return 3 short paragraphs: recommendation, business reason, migration caution.
+Write 2-3 professional paragraphs.
+
+Explain:
+- Why the selected migration strategy is appropriate.
+- How the repository architecture influenced the recommendation.
+- What business value the organization will gain.
+- Key migration risks and considerations.
+
+Requirements:
+- Write in complete sentences and paragraphs.
+- Do not use headings.
+- Do not use bullet points.
+- Do not repeat the evidence list verbatim.
+- Do not suggest a different migration strategy.
+- Do not contradict the selected migration strategy.
+- Write like a senior cloud architect preparing an executive migration assessment.
 """
     return _chat(
         [
@@ -165,7 +276,7 @@ def _chat_completion(
     max_tokens: int,
     response_format: dict[str, str] | None,
 ) -> str:
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = GROQ_API_KEY
     if not api_key:
         return fallback
 
@@ -200,8 +311,31 @@ def _json_payload(content: str) -> str:
     return content.strip()
 
 
+def _load_json_object(content: str) -> dict[str, Any]:
+    print("LLM Content:",content)
+    payload = _json_payload(content)
+    try:
+        data = json.loads(payload)
+    except json.JSONDecodeError:
+        decoder = json.JSONDecoder()
+        start = payload.find("{")
+        if start == -1:
+            raise
+        data, _ = decoder.raw_decode(payload[start:])
+
+    if not isinstance(data, dict):
+        raise ValueError("LLM response JSON must be an object.")
+    return data
+
+
+def _safe_preview(content: str) -> str:
+    compact = " ".join(content.split())
+    return compact[:180]
+
+
 def _empty_repository_analysis(detected_files: list[str]) -> RepositoryAnalysis:
     return RepositoryAnalysis(
+        project_summary="Unknown",
         languages=[],
         frameworks=[],
         runtimes=[],

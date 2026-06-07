@@ -1,16 +1,17 @@
 from __future__ import annotations
-
 from uuid import uuid4
-
 from .ai import generate_architect_reasoning
+from .migration_strategy import determine_migration_strategy, assess_strategy_alignment
 from .models import (
     AssessmentRequest,
     AssessmentResponse,
     CostEstimate,
+    FolderAssessmentRequest,
     GovernanceAssessment,
     ReadinessAssessment,
     RepositoryAnalysis,
     ServiceRecommendation,
+    CloudSizingRequirements
 )
 from .storage import utc_now
 
@@ -43,13 +44,21 @@ SERVICE_MAP = {
 }
 
 
-def build_assessment(request: AssessmentRequest, analysis: RepositoryAnalysis, warnings: list[str]) -> AssessmentResponse:
+def build_assessment(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis, warnings: list[str]) -> AssessmentResponse:
+    strategy_result = determine_migration_strategy(
+    request.requirements.migration_goal,
+    analysis
+    )
+    strategy_assessment = assess_strategy_alignment(
+    request.requirements.migration_goal,
+    strategy_result
+)
     provider = _select_provider(request, analysis)
     readiness = _readiness(analysis)
     services = _services(provider, analysis)
     cost = _cost_estimate(request, analysis)
     opportunities = _modernization_opportunities(analysis, provider)
-    strategy = _strategy(request, readiness)
+    strategy = strategy_result.strategy
     roadmap = _roadmap(strategy, analysis, provider)
     architecture_summary = _architecture_summary(analysis)
     governance = _governance(analysis)
@@ -59,6 +68,12 @@ def build_assessment(request: AssessmentRequest, analysis: RepositoryAnalysis, w
         [item.model_dump() for item in services],
         cost.model_dump(),
         roadmap,
+        strategy_result
+    )
+    cloud_sizing = cloud_sizing = (
+        analysis.cloud_sizing
+        if analysis.cloud_sizing
+        else CloudSizingRequirements()
     )
 
     response = AssessmentResponse(
@@ -77,6 +92,8 @@ def build_assessment(request: AssessmentRequest, analysis: RepositoryAnalysis, w
         ai_reasoning=ai_reasoning,
         blueprint_markdown="",
         warnings=warnings,
+        cloud_sizing=cloud_sizing,
+        strategy_assessment=strategy_assessment,
     )
     response.blueprint_markdown = render_blueprint(response)
     return response
@@ -92,6 +109,18 @@ def render_blueprint(assessment: AssessmentResponse) -> str:
     warnings = "\n".join(f"- {item}" for item in assessment.warnings) or "- None"
 
     stack = assessment.technology_stack
+
+    strategy_assessment = assessment.strategy_assessment
+
+    strategy_section = ""
+
+    strategy_section = f"""
+## 8. Migration Strategy Assessment
+
+- Given Migration Strategy: {strategy_assessment.user_goal}
+- Infraguide Recommended Migration Strategy: {strategy_assessment.recommended_strategy}
+- Confidence: {strategy_assessment.confidence}
+"""
     return f"""# InfraGuide AI Migration Blueprint
 
 ## 1. Technology Stack Analysis
@@ -109,6 +138,9 @@ def render_blueprint(assessment: AssessmentResponse) -> str:
 - CI/CD Configurations: {_join(stack.cicd_configs)}
 - External Dependencies: {_join(stack.external_dependencies)}
 - Cloud Dependencies: {_join(stack.cloud_dependencies)}
+
+Project Summary:
+{stack.project_summary}
 
 Dependency Graph:
 {_bullet_list(stack.dependency_graph)}
@@ -153,9 +185,7 @@ Assumptions:
 
 {opportunities}
 
-## 8. Migration Strategy
-
-{assessment.migration_strategy}
+{strategy_section}
 
 ## 9. Migration Roadmap
 
@@ -189,7 +219,7 @@ Recommendations:
 """
 
 
-def _select_provider(request: AssessmentRequest, analysis: RepositoryAnalysis) -> str:
+def _select_provider(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis) -> str:
     if request.requirements.cloud_provider.value != "No Preference":
         return request.requirements.cloud_provider.value
     if "Azure Functions" in analysis.frameworks or "ASP.NET Core" in analysis.frameworks or "SQL Server" in analysis.databases:
@@ -292,7 +322,7 @@ def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecomm
     return services
 
 
-def _cost_estimate(request: AssessmentRequest, analysis: RepositoryAnalysis) -> CostEstimate:
+def _cost_estimate(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis) -> CostEstimate:
     line_items: list[str] = []
     if "Azure Functions" in analysis.frameworks:
         base = 4500
@@ -364,7 +394,7 @@ def _modernization_opportunities(analysis: RepositoryAnalysis, provider: str) ->
     return opportunities
 
 
-def _strategy(request: AssessmentRequest, readiness: ReadinessAssessment) -> str:
+def _strategy(request: AssessmentRequest | FolderAssessmentRequest, readiness: ReadinessAssessment) -> str:
     goal = request.requirements.migration_goal.value
     if goal == "Lift-and-Shift":
         return "Rehost"
@@ -398,6 +428,8 @@ def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list
 
 
 def _architecture_summary(analysis: RepositoryAnalysis) -> str:
+    if analysis.project_summary and analysis.project_summary != "Unknown":
+        return analysis.project_summary
     if "Azure Functions" in analysis.frameworks:
         triggers = f" Triggers: {_join(analysis.triggers)}." if analysis.triggers else ""
         return f"{analysis.architecture_pattern}. Hosting model: {analysis.hosting_model}. Runtime: {_join(analysis.runtimes)}.{triggers}"

@@ -55,9 +55,28 @@ class MigrationRequirements(BaseModel):
 class AssessmentRequest(BaseModel):
     repository_url: HttpUrl
     requirements: MigrationRequirements
+    github_token: Optional[str] = None
+
+
+class FolderAssessmentRequest(BaseModel):
+    project_name: str = "Uploaded folder"
+    requirements: MigrationRequirements
+
+class CloudSizingRequirements(BaseModel):
+    application_type: str = "Unknown"
+    architecture_pattern: str = "Unknown"
+    cpu_cores: int = 2
+    memory_gb: int = 4
+    storage_gb: int = 50
+    database_type: str = "Unknown"
+    database_size_gb: int = 20
+    requires_load_balancer: bool = False
+    requires_containerization: bool = False
+    confidence: str = "Low"
 
 
 class RepositoryAnalysis(BaseModel):
+    project_summary: str = "Unknown"
     languages: List[str] = Field(default_factory=list)
     frameworks: List[str] = Field(default_factory=list)
     runtimes: List[str] = Field(default_factory=list)
@@ -72,14 +91,14 @@ class RepositoryAnalysis(BaseModel):
     external_dependencies: List[str] = Field(default_factory=list)
     cloud_dependencies: List[str] = Field(default_factory=list)
     dependency_graph: List[str] = Field(default_factory=list)
-    architecture_pattern: str
+    architecture_pattern: str = "Unknown"
     application_type: str = "Unknown"
     stateful_services: List[str] = Field(default_factory=list)
     storage_dependencies: List[str] = Field(default_factory=list)
     network_requirements: List[str] = Field(default_factory=list)
     governance_findings: List[str] = Field(default_factory=list)
     detected_files: List[str] = Field(default_factory=list)
-
+    cloud_sizing: Optional[CloudSizingRequirements] = None
 
 class ReadinessAssessment(BaseModel):
     runtime_compatibility: str
@@ -114,6 +133,12 @@ class GovernanceAssessment(BaseModel):
     recommendations: List[str] = Field(default_factory=list)
     recommendation: str
 
+class StrategyAssessment(BaseModel):
+    user_goal: str
+    recommended_strategy: str
+    confidence: str
+    is_aligned: bool
+    recommendation_reason: list[str]
 
 class AssessmentResponse(BaseModel):
     id: Optional[str] = None
@@ -132,6 +157,8 @@ class AssessmentResponse(BaseModel):
     approval_status: ApprovalStatus = ApprovalStatus.pending
     blueprint_markdown: str
     warnings: List[str] = Field(default_factory=list)
+    cloud_sizing: Optional[CloudSizingRequirements] = None
+    strategy_assessment: Optional[StrategyAssessment] = None
 
 
 class BlueprintRequest(BaseModel):
@@ -169,3 +196,9 @@ class ChatResponse(BaseModel):
     answer: str
     provider: str
     model: str
+
+class MigrationStrategyResult(BaseModel):
+    strategy: str
+    confidence: str
+    reasons: list[str]
+

@@ -41,3 +41,65 @@ body {
   border-color: #2f5d50;
   box-shadow: 0 0 0 3px rgba(47, 93, 80, 0.16);
 }
+
+.source-tab {
+  min-height: 2.4rem;
+  border: 0;
+  border-radius: 0.325rem;
+  background: transparent;
+  font: inherit;
+  font-weight: 700;
+  color: rgba(23, 32, 27, 0.62);
+  cursor: pointer;
+}
+
+.source-tab-active {
+  background: #ffffff;
+  color: #17201b;
+  box-shadow: 0 1px 4px rgba(23, 32, 27, 0.08);
+}
+
+.file-input {
+  padding: 0.55rem 0.85rem;
+}
+
+.clear-folder-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  flex: 0 0 auto;
+  border: 1px solid rgba(23, 32, 27, 0.14);
+  border-radius: 999px;
+  background: #ffffff;
+  color: rgba(23, 32, 27, 0.68);
+  cursor: pointer;
+}
+
+.clear-folder-button:hover {
+  border-color: rgba(185, 28, 28, 0.28);
+  color: #b91c1c;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(23, 32, 27, 0.48);
+  padding: 1rem;
+}
+
+.modal-panel {
+  width: min(100%, 32rem);
+  max-height: calc(100vh - 2rem);
+  overflow: auto;
+  border-radius: 0.5rem;
+  border: 1px solid rgba(23, 32, 27, 0.12);
+  background: #ffffff;
+  padding: 1.25rem;
+  box-shadow: 0 24px 70px rgba(23, 32, 27, 0.26);
+}

@@ -5,6 +5,7 @@ AI-powered cloud migration intelligence platform for generating repository asses
 ## MVP Features
 
 - GitHub repository URL input
+- Local project folder upload
 - Migration requirements form
 - Repository analysis for languages, frameworks, databases, package managers, and containers
 - Cloud readiness scoring
@@ -43,7 +44,8 @@ Open `http://localhost:5173`.
 
 ## API
 
-- `POST /api/assessments` generates the migration assessment.
+- `POST /api/assessments` generates a migration assessment from a GitHub repository URL.
+- `POST /api/assessments/upload` generates a migration assessment from multipart uploaded folder files.
 - `POST /api/assessments/blueprint` returns a Markdown migration blueprint.
 
 ## Notes
