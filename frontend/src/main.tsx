@@ -3,7 +3,7 @@ import ReactDOM from "react-dom/client";
 import { ArrowDownToLine, CloudCog, FileText, FolderOpen, GitBranch, Loader2, Route, ServerCog, X } from "lucide-react";
 import "./styles.css";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:9000";
 const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 const IGNORED_UPLOAD_PARTS = new Set([".git", "node_modules", "vendor", "bin", "obj", "dist", "build", ".venv", "venv", "env", "__pycache__"]);
 

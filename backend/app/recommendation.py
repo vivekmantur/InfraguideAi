@@ -2,6 +2,9 @@ from __future__ import annotations
 from uuid import uuid4
 from .ai import generate_architect_reasoning
 from .migration_strategy import determine_migration_strategy, assess_strategy_alignment
+from app.services.mcp_client import (
+    CloudMcpClient
+)
 from .models import (
     AssessmentRequest,
     AssessmentResponse,
@@ -44,7 +47,7 @@ SERVICE_MAP = {
 }
 
 
-def build_assessment(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis, warnings: list[str]) -> AssessmentResponse:
+async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis, warnings: list[str]) -> AssessmentResponse:
     strategy_result = determine_migration_strategy(
     request.requirements.migration_goal,
     analysis
@@ -56,7 +59,9 @@ def build_assessment(request: AssessmentRequest | FolderAssessmentRequest, analy
     provider = _select_provider(request, analysis)
     readiness = _readiness(analysis)
     services = _services(provider, analysis)
-    cost = _cost_estimate(request, analysis)
+    print(request.requirements.cloud_provider)
+    cost = await _cost_estimate(request, analysis)
+    print(f"Cost estimate for provider {provider}: {cost.monthly} INR/month with line items: {cost.line_items}")
     opportunities = _modernization_opportunities(analysis, provider)
     strategy = strategy_result.strategy
     roadmap = _roadmap(strategy, analysis, provider)
@@ -322,35 +327,278 @@ def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecomm
     return services
 
 
-def _cost_estimate(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis) -> CostEstimate:
+async def _cost_estimate(
+    request: AssessmentRequest | FolderAssessmentRequest,
+    analysis: RepositoryAnalysis
+) -> CostEstimate:
+
+    provider = _select_provider(
+        request,
+        analysis
+    )
+
+    # --------------------------------------------------
+    # GCP Pricing Through MCP
+    # --------------------------------------------------
+
+
+
+    if analysis.cloud_sizing:
+
+        cpu = analysis.cloud_sizing.cpu_cores
+        memory = analysis.cloud_sizing.memory_gb
+
+        mcp_client = CloudMcpClient()
+
+        # -----------------------------------------
+        # GCP
+        # -----------------------------------------
+
+        if provider == "GCP":
+
+            pricing = await mcp_client.get_gcp_compute_pricing(
+                cpu=cpu,
+                memory=memory
+            )
+
+            print(
+                "GCP Pricing Response:",
+                pricing
+            )
+
+            if pricing is None:
+
+                print(
+                    "MCP returned None. "
+                    "Falling back to heuristic pricing."
+                )
+
+            elif (
+                isinstance(pricing, dict)
+                and "error" not in pricing
+            ):
+
+                monthly = pricing["monthly_cost"]
+
+                lower = int(monthly * 0.9)
+                upper = int(monthly * 1.1)
+
+                return CostEstimate(
+                    currency=pricing.get(
+                        "currency",
+                        "USD"
+                    ),
+                    monthly=int(monthly),
+                    monthly_range=(
+                        f"{pricing.get('currency', 'USD')} "
+                        f"{lower:,} - {upper:,}/month"
+                    ),
+                    annual=int(monthly * 12),
+                    line_items=[
+                        (
+                            f"GCP Compute Engine "
+                            f"({pricing['machine_type']})"
+                        ),
+                        f"{cpu} vCPU",
+                        f"{memory} GB RAM",
+                        (
+                            "Pricing retrieved from "
+                            "Google Cloud Billing API"
+                        )
+                    ],
+                    assumptions=[
+                        (
+                            f"Machine type selected: "
+                            f"{pricing['machine_type']}"
+                        ),
+                        f"CPU requirement: {cpu}",
+                        f"Memory requirement: {memory}",
+                        (
+                            "Cost calculated using "
+                            "Google Cloud Billing API"
+                        )
+                    ],
+                )
+
+            else:
+
+                print(
+                    "GCP pricing failed:"
+                )
+
+                print(pricing)
+
+                print(
+                    "Falling back to "
+                    "heuristic pricing."
+                )
+
+        # -----------------------------------------
+        # Azure
+        # -----------------------------------------
+
+        elif provider == "Azure":
+
+            pricing = await mcp_client.get_azure_vm_pricing(
+                cpu=cpu,
+                memory=memory
+            )
+
+            print(
+                "Azure Pricing Response:",
+                pricing
+            )
+
+            if pricing is None:
+
+                print(
+                    "MCP returned None. "
+                    "Falling back to heuristic pricing."
+                )
+
+            elif (
+                isinstance(pricing, dict)
+                and "error" not in pricing
+            ):
+
+                monthly = pricing["monthly_cost"]
+
+                lower = int(monthly * 0.9)
+                upper = int(monthly * 1.1)
+
+                return CostEstimate(
+                    currency=pricing.get(
+                        "currency",
+                        "USD"
+                    ),
+                    monthly=int(monthly),
+                    monthly_range=(
+                        f"{pricing.get('currency', 'USD')} "
+                        f"{lower:,} - {upper:,}/month"
+                    ),
+                    annual=int(monthly * 12),
+                    line_items=[
+                        (
+                            f"Azure VM "
+                            f"({pricing['sku']})"
+                        ),
+                        f"{cpu} vCPU",
+                        f"{memory} GB RAM",
+                        (
+                            "Pricing retrieved from "
+                            "Azure Retail Pricing API"
+                        )
+                    ],
+                    assumptions=[
+                        (
+                            f"VM SKU selected: "
+                            f"{pricing['sku']}"
+                        ),
+                        (
+                            f"Azure region: "
+                            f"{pricing['region']}"
+                        ),
+                        f"CPU requirement: {cpu}",
+                        f"Memory requirement: {memory}",
+                        (
+                            "Cost calculated using "
+                            "Azure Retail Pricing API"
+                        )
+                    ],
+                )
+
+            else:
+
+                print(
+                    "Azure pricing failed:"
+                )
+
+                print(pricing)
+
+                print(
+                    "Falling back to "
+                    "heuristic pricing."
+                )
+    # --------------------------------------------------
+    # Existing heuristic pricing
+    # --------------------------------------------------
+
     line_items: list[str] = []
+
     if "Azure Functions" in analysis.frameworks:
+
         base = 4500
-        line_items.append("Azure Functions Premium/Consumption baseline: INR 3,000-6,000/month for a small event-driven workload.")
+
+        line_items.append(
+            "Azure Functions Premium/Consumption baseline: INR 3,000-6,000/month for a small event-driven workload."
+        )
+
     else:
+
         base = 6000
-        line_items.append("Managed application runtime: INR 5,000-8,000/month for small production compute.")
 
-    if request.requirements.expected_traffic.value == "Medium":
+        line_items.append(
+            "Managed application runtime: INR 5,000-8,000/month for small production compute."
+        )
+
+    if (
+        request.requirements.expected_traffic.value
+        == "Medium"
+    ):
+
         base += 4000
-        line_items.append("Medium traffic capacity buffer: INR 4,000/month.")
-    if request.requirements.expected_traffic.value == "High":
-        base += 10000
-        line_items.append("High traffic capacity buffer: INR 10,000/month.")
-    if analysis.databases:
-        base += 3500
-        line_items.append("Managed database estimate: INR 3,500/month.")
-    if analysis.cloud_dependencies or analysis.storage_dependencies:
-        base += 1200
-        line_items.append("Storage and cloud dependency allowance: INR 1,200/month.")
-    line_items.append("Monitoring/log analytics allowance: INR 1,000-2,000/month depending on retained logs.")
 
-    if request.requirements.budget_preference.value == "Performance Focused":
+        line_items.append(
+            "Medium traffic capacity buffer: INR 4,000/month."
+        )
+
+    if (
+        request.requirements.expected_traffic.value
+        == "High"
+    ):
+
+        base += 10000
+
+        line_items.append(
+            "High traffic capacity buffer: INR 10,000/month."
+        )
+
+    if analysis.databases:
+
+        base += 3500
+
+        line_items.append(
+            "Managed database estimate: INR 3,500/month."
+        )
+
+    if (
+        analysis.cloud_dependencies
+        or analysis.storage_dependencies
+    ):
+
+        base += 1200
+
+        line_items.append(
+            "Storage and cloud dependency allowance: INR 1,200/month."
+        )
+
+    line_items.append(
+        "Monitoring/log analytics allowance: INR 1,000-2,000/month depending on retained logs."
+    )
+
+    if (
+        request.requirements.budget_preference.value
+        == "Performance Focused"
+    ):
+
         base = int(base * 1.45)
-        line_items.append("Performance focused sizing multiplier applied: 1.45x.")
-    if request.requirements.budget_preference.value == "Low Cost":
+
+    if (
+        request.requirements.budget_preference.value
+        == "Low Cost"
+    ):
+
         base = int(base * 0.8)
-        line_items.append("Low cost preference discount applied: 0.8x using smaller/serverless-first sizing.")
 
     lower = int(base * 0.85)
     upper = int(base * 1.2)
@@ -358,17 +606,27 @@ def _cost_estimate(request: AssessmentRequest | FolderAssessmentRequest, analysi
     return CostEstimate(
         currency="INR",
         monthly=base,
-        monthly_range=f"INR {lower:,} - INR {upper:,}/month",
+        monthly_range=(
+            f"INR {lower:,} - INR {upper:,}/month"
+        ),
         annual=base * 12,
         line_items=line_items,
         assumptions=[
-            f"Expected traffic profile: {request.requirements.expected_traffic.value}.",
-            f"Hosting model detected: {analysis.hosting_model}.",
-            "Estimate includes managed runtime, storage, secrets, and monitoring.",
-            "Final price depends on region, usage, reserved capacity, and data transfer.",
+            (
+                f"Expected traffic profile: "
+                f"{request.requirements.expected_traffic.value}"
+            ),
+            (
+                f"Hosting model detected: "
+                f"{analysis.hosting_model}"
+            ),
+            (
+                "Estimate includes managed runtime, "
+                "storage, secrets and monitoring."
+            ),
         ],
     )
-
+    
 
 def _modernization_opportunities(analysis: RepositoryAnalysis, provider: str) -> list[str]:
     cloud = SERVICE_MAP[provider]

@@ -34,11 +34,26 @@ def health() -> dict[str, str]:
 
 
 @app.post("/assessments")
-def create_assessment(request: AssessmentRequest):
-    analysis, warnings = analyze_repository(str(request.repository_url),request.requirements,request.github_token)
-    return build_assessment(request, analysis, warnings)
+async def create_assessment(
+    request: AssessmentRequest
+):
+    print(
+        f"Received assessment request "
+        f"for repository: "
+        f"{request.repository_url}"
+    )
 
+    analysis, warnings = analyze_repository(
+        str(request.repository_url),
+        request.requirements,
+        request.github_token
+    )
 
+    return await build_assessment(
+        request,
+        analysis,
+        warnings
+    )
 @app.post("/assessments/upload")
 async def create_uploaded_assessment(
     files: list[UploadFile] = File(...),

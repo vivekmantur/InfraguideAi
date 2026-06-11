@@ -64,13 +64,17 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
         print("CLONE SUCCESSFUL")
         print("Repository cloned to:", tmp_dir)
         files = list(_iter_repo_files(tmp_dir))
-        result = subprocess.run(
-                ["git", "config", "--list"],
-                capture_output=True,
-                text=True
-            )
+        # print("BEFORE SUBPROCESS")
 
-        print(result.stdout)
+        # result = subprocess.run(
+        #     ["git", "config", "--list"],
+        #     capture_output=True,
+        #     text=True
+        # )
+
+        # print("AFTER SUBPROCESS")
+
+        # print(result.stdout)
         detected_files = [str(path.relative_to(tmp_dir)).replace("\\", "/") for path in files]
         evidence = _collect_evidence(files, tmp_dir)
         fallback = _infer_repository_analysis(detected_files, evidence)
