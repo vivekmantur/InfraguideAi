@@ -251,8 +251,8 @@ function App() {
         </div>
       </section>
 
-      <section className="mx-auto grid max-w-7xl gap-5 px-5 py-5 lg:grid-cols-[420px_minmax(0,1fr)]">
-        <form onSubmit={submitAssessment} className="rounded-lg border border-ink/10 bg-white p-5 shadow-panel">
+      <section className="grid w-full items-start gap-5 px-5 py-5 lg:grid-cols-[420px_minmax(0,1fr)] xl:grid-cols-[420px_minmax(0,1fr)_420px]">
+        <form onSubmit={submitAssessment} className="rounded-lg border border-ink/10 bg-white p-5 shadow-panel lg:sticky lg:top-5 lg:max-h-[calc(100vh-2.5rem)] lg:overflow-auto">
           <div className="mb-5 flex items-center gap-2">
             {sourceMode === "github" ? <GitBranch size={20} className="text-signal" /> : <FolderOpen size={20} className="text-signal" />}
             <h2 className="text-xl font-semibold">Migration Input</h2>
@@ -334,6 +334,8 @@ function App() {
             </div>
           )}
         </section>
+
+        <BlueprintPreview assessment={assessment} className="lg:col-span-2 xl:col-span-1" />
       </section>
 
       {isTokenModalOpen && (
@@ -505,18 +507,32 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
         </Panel>
       </div>
 
-      <Panel title="Blueprint Preview" className="mt-4">
-        <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md bg-ink p-4 text-sm leading-6 text-white">
-          {assessment.blueprint_markdown}
-        </pre>
-      </Panel>
-
       {assessment.warnings.length > 0 && (
         <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
           {assessment.warnings.join(" ")}
         </div>
       )}
     </div>
+  );
+}
+
+function BlueprintPreview({ assessment, className = "" }: { assessment: Assessment | null; className?: string }) {
+  return (
+    <aside className={`min-h-[680px] rounded-lg border border-ink/10 bg-white p-5 shadow-panel lg:sticky lg:top-5 lg:max-h-[calc(100vh-2.5rem)] ${className}`}>
+      <div className="mb-4 flex items-center gap-2">
+        <FileText size={20} className="text-signal" />
+        <h2 className="text-xl font-semibold">Blueprint Preview</h2>
+      </div>
+      {assessment ? (
+        <pre className="max-h-[calc(100vh-7.5rem)] min-h-[580px] overflow-auto whitespace-pre-wrap rounded-md bg-ink p-4 text-sm leading-6 text-white">
+          {assessment.blueprint_markdown}
+        </pre>
+      ) : (
+        <div className="flex min-h-[580px] flex-col justify-center rounded-md bg-cloud p-4 text-center text-sm leading-6 text-ink/65">
+          Markdown preview appears here after a blueprint is generated.
+        </div>
+      )}
+    </aside>
   );
 }
 

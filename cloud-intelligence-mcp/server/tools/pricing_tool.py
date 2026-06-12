@@ -85,3 +85,31 @@ def register_pricing_tools(mcp):
                 "provider": "GCP",
                 "error": str(ex)
             }
+
+    @mcp.tool()
+    async def get_gcp_service_pricing(
+        services: list[dict],
+        region: str = "us-central1"
+    ) -> dict:
+
+        try:
+
+            result = await gcp_client.get_service_prices(
+                region,
+                services
+            )
+
+            print("GCP Service Pricing Result:")
+            print(result)
+
+            return result
+
+        except Exception as ex:
+
+            print("GCP Service Pricing Error:")
+            print(ex)
+
+            return {
+                "provider": "GCP",
+                "error": str(ex)
+            }

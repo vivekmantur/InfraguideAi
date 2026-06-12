@@ -58,9 +58,11 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
 )
     provider = _select_provider(request, analysis)
     readiness = _readiness(analysis)
+    print(f"analysis: {analysis},provider:{provider}")
     services = _services(provider, analysis)
+    print(f"Recommended services for provider {services}")
     print(request.requirements.cloud_provider)
-    cost = await _cost_estimate(request, analysis)
+    cost = await _cost_estimate(request, analysis, services)
     print(f"Cost estimate for provider {provider}: {cost.monthly} INR/month with line items: {cost.line_items}")
     opportunities = _modernization_opportunities(analysis, provider)
     strategy = strategy_result.strategy
@@ -329,7 +331,8 @@ def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecomm
 
 async def _cost_estimate(
     request: AssessmentRequest | FolderAssessmentRequest,
-    analysis: RepositoryAnalysis
+    analysis: RepositoryAnalysis,
+    services: list[ServiceRecommendation] | None = None
 ) -> CostEstimate:
 
     provider = _select_provider(
@@ -379,21 +382,82 @@ async def _cost_estimate(
             ):
 
                 monthly = pricing["monthly_cost"]
+                service_pricing = None
+                additional_monthly = 0
+                additional_line_items: list[str] = []
+                additional_assumptions: list[str] = []
 
-                lower = int(monthly * 0.9)
-                upper = int(monthly * 1.1)
+                if services:
+
+                    billable_services = [
+                        service
+                        for service in services
+                        if service.component != "Application Runtime"
+                    ]
+
+                    try:
+
+                        service_pricing = await mcp_client.get_gcp_service_pricing(
+                            services=[
+                                service.model_dump()
+                                for service in billable_services
+                            ]
+                        )
+
+                    except Exception as ex:
+
+                        print(
+                            "GCP service pricing failed:"
+                        )
+                        print(ex)
+
+                    if (
+                        isinstance(service_pricing, dict)
+                        and "error" not in service_pricing
+                    ):
+
+                        additional_monthly = int(
+                            service_pricing.get(
+                                "monthly_cost",
+                                0
+                            )
+                        )
+                        additional_line_items.extend(
+                            service_pricing.get(
+                                "line_items",
+                                []
+                            )
+                        )
+                        additional_assumptions.extend(
+                            service_pricing.get(
+                                "assumptions",
+                                []
+                            )
+                        )
+
+                    elif service_pricing:
+
+                        print(
+                            "GCP service pricing returned error:"
+                        )
+                        print(service_pricing)
+
+                total_monthly = monthly + additional_monthly
+
+                lower = int(total_monthly * 0.9)
+                upper = int(total_monthly * 1.1)
 
                 return CostEstimate(
                     currency=pricing.get(
                         "currency",
                         "USD"
                     ),
-                    monthly=int(monthly),
+                    monthly=int(total_monthly),
                     monthly_range=(
                         f"{pricing.get('currency', 'USD')} "
                         f"{lower:,} - {upper:,}/month"
                     ),
-                    annual=int(monthly * 12),
+                    annual=int(total_monthly * 12),
                     line_items=[
                         (
                             f"GCP Compute Engine "
@@ -405,7 +469,7 @@ async def _cost_estimate(
                             "Pricing retrieved from "
                             "Google Cloud Billing API"
                         )
-                    ],
+                    ] + additional_line_items,
                     assumptions=[
                         (
                             f"Machine type selected: "
@@ -417,7 +481,7 @@ async def _cost_estimate(
                             "Cost calculated using "
                             "Google Cloud Billing API"
                         )
-                    ],
+                    ] + additional_assumptions,
                 )
 
             else:
@@ -462,21 +526,86 @@ async def _cost_estimate(
             ):
 
                 monthly = pricing["monthly_cost"]
+                service_pricing = None
+                additional_monthly = 0
+                additional_line_items: list[str] = []
+                additional_assumptions: list[str] = []
 
-                lower = int(monthly * 0.9)
-                upper = int(monthly * 1.1)
+                if services:
+
+                    billable_services = [
+                        service
+                        for service in services
+                        if service.component != "Application Runtime"
+                    ]
+
+                    try:
+
+                        service_pricing = await mcp_client.get_azure_service_pricing(
+                            services=[
+                                service.model_dump()
+                                for service in billable_services
+                            ],
+                            region=pricing.get(
+                                "region",
+                                "eastus"
+                            )
+                        )
+
+                    except Exception as ex:
+
+                        print(
+                            "Azure service pricing failed:"
+                        )
+                        print(ex)
+
+                    if (
+                        isinstance(service_pricing, dict)
+                        and "error" not in service_pricing
+                    ):
+
+                        additional_monthly = int(
+                            service_pricing.get(
+                                "monthly_cost",
+                                0
+                            )
+                        )
+                        additional_line_items.extend(
+                            service_pricing.get(
+                                "line_items",
+                                []
+                            )
+                        )
+                        additional_assumptions.extend(
+                            service_pricing.get(
+                                "assumptions",
+                                []
+                            )
+                        )
+
+                    elif service_pricing:
+
+                        print(
+                            "Azure service pricing returned error:"
+                        )
+                        print(service_pricing)
+
+                total_monthly = monthly + additional_monthly
+
+                lower = int(total_monthly * 0.9)
+                upper = int(total_monthly * 1.1)
 
                 return CostEstimate(
                     currency=pricing.get(
                         "currency",
                         "USD"
                     ),
-                    monthly=int(monthly),
+                    monthly=int(total_monthly),
                     monthly_range=(
                         f"{pricing.get('currency', 'USD')} "
                         f"{lower:,} - {upper:,}/month"
                     ),
-                    annual=int(monthly * 12),
+                    annual=int(total_monthly * 12),
                     line_items=[
                         (
                             f"Azure VM "
@@ -488,7 +617,7 @@ async def _cost_estimate(
                             "Pricing retrieved from "
                             "Azure Retail Pricing API"
                         )
-                    ],
+                    ] + additional_line_items,
                     assumptions=[
                         (
                             f"VM SKU selected: "
@@ -504,7 +633,7 @@ async def _cost_estimate(
                             "Cost calculated using "
                             "Azure Retail Pricing API"
                         )
-                    ],
+                    ] + additional_assumptions,
                 )
 
             else:

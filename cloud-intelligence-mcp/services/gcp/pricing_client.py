@@ -11,6 +11,55 @@ class GcpPricingClient:
         "https://cloudbilling.googleapis.com/v2beta"
     )
 
+    SERVICE_RULES = [
+        {
+            "match": "Cloud SQL",
+            "service_display_name": "Cloud SQL",
+            "quantity": 730,
+            "unit": "vCPU-hours/month",
+            "required_terms": [
+                "CPU"
+            ],
+            "fallback_monthly": 95,
+        },
+        {
+            "match": "Cloud Storage",
+            "service_display_name": "Cloud Storage",
+            "quantity": 50,
+            "unit": "GB-month",
+            "required_terms": [
+                "Storage"
+            ],
+            "preferred_terms": [
+                "Standard"
+            ],
+            "fallback_monthly": 2,
+        },
+        {
+            "match": "Secret Manager",
+            "service_display_name": "Secret Manager",
+            "quantity": 10,
+            "unit": "10k operations/month",
+            "required_terms": [
+                "Access"
+            ],
+            "fallback_monthly": 1,
+        },
+        {
+            "match": "Cloud Monitoring",
+            "service_display_name": "Cloud Monitoring",
+            "quantity": 5,
+            "unit": "GB ingested/month",
+            "required_terms": [
+                "Monitoring"
+            ],
+            "preferred_terms": [
+                "Data"
+            ],
+            "fallback_monthly": 15,
+        },
+    ]
+
     def __init__(
         self,
         api_key: str
@@ -421,3 +470,379 @@ class GcpPricingClient:
                     "ram_sku"
                 ]
         }
+
+    async def get_service_prices(
+        self,
+        region: str,
+        services: list[dict]
+    ) -> dict:
+
+        line_items: list[str] = []
+        assumptions: list[str] = []
+        items: list[dict] = []
+        monthly_total = 0.0
+        currency = "USD"
+
+        for service in services:
+
+            recommended = service.get(
+                "recommended",
+                ""
+            )
+            component = service.get(
+                "component",
+                recommended
+            )
+
+            rule = self._find_rule(
+                recommended
+            )
+
+            if not rule:
+
+                continue
+
+            estimate = await self._estimate_service_price(
+                region,
+                recommended,
+                rule
+            )
+
+            monthly_total += estimate["monthly_cost"]
+            currency = estimate.get(
+                "currency",
+                currency
+            )
+
+            items.append(
+                {
+                    "component": component,
+                    "recommended": recommended,
+                    **estimate
+                }
+            )
+            line_items.append(
+                (
+                    f"{component}: {recommended} "
+                    f"({estimate['quantity']} {estimate['unit']}): "
+                    f"{estimate['currency']} "
+                    f"{estimate['monthly_cost']:.2f}/month"
+                )
+            )
+            assumptions.append(
+                (
+                    f"{recommended}: estimated with "
+                    f"{estimate['quantity']} {estimate['unit']} "
+                    f"using {estimate['source']}."
+                )
+            )
+
+        return {
+            "provider": "GCP",
+            "region": region,
+            "currency": currency,
+            "monthly_cost": round(
+                monthly_total,
+                2
+            ),
+            "line_items": line_items,
+            "assumptions": assumptions,
+            "items": items
+        }
+
+    def _find_rule(
+        self,
+        recommended: str
+    ) -> dict | None:
+
+        for rule in self.SERVICE_RULES:
+
+            if rule["match"] in recommended:
+
+                return rule
+
+        return None
+
+    async def _estimate_service_price(
+        self,
+        region: str,
+        recommended: str,
+        rule: dict
+    ) -> dict:
+
+        try:
+
+            sku = await self._find_service_sku(
+                region,
+                rule
+            )
+            price = await self.get_sku_price(
+                sku["skuId"]
+            )
+
+        except Exception as ex:
+
+            return {
+                "currency": "USD",
+                "monthly_cost": float(
+                    rule["fallback_monthly"]
+                ),
+                "quantity": rule["quantity"],
+                "unit": rule["unit"],
+                "source": (
+                    "baseline fallback because Google Cloud "
+                    f"Billing lookup failed: {str(ex)}"
+                ),
+                "sku_id": None,
+                "sku_name": recommended,
+            }
+
+        monthly_cost = (
+            price["hourly_cost"]
+            * rule["quantity"]
+        )
+
+        return {
+            "currency": price.get(
+                "currency",
+                "USD"
+            ),
+            "monthly_cost": round(
+                monthly_cost,
+                2
+            ),
+            "quantity": rule["quantity"],
+            "unit": rule["unit"],
+            "source": "Google Cloud Billing API",
+            "sku_id": sku.get(
+                "skuId"
+            ),
+            "sku_name": sku.get(
+                "displayName"
+            ),
+            "service_regions": sku.get(
+                "serviceRegions",
+                []
+            )
+        }
+
+    async def _find_service_sku(
+        self,
+        region: str,
+        rule: dict
+    ) -> dict:
+
+        service_id = await self._find_service_id(
+            rule["service_display_name"]
+        )
+
+        skus = await self._load_service_skus(
+            service_id
+        )
+
+        candidates = [
+            sku
+            for sku in skus
+            if self._sku_matches_region(
+                sku,
+                region
+            )
+            and all(
+                self._sku_contains(
+                    sku,
+                    term
+                )
+                for term in rule.get(
+                    "required_terms",
+                    []
+                )
+            )
+        ]
+
+        if not candidates:
+
+            raise ValueError(
+                f"No SKU matched "
+                f"{rule['service_display_name']}"
+            )
+
+        preferred = [
+            sku
+            for sku in candidates
+            if all(
+                self._sku_contains(
+                    sku,
+                    term
+                )
+                for term in rule.get(
+                    "preferred_terms",
+                    []
+                )
+            )
+        ]
+
+        return (
+            preferred[0]
+            if preferred
+            else candidates[0]
+        )
+
+    async def _find_service_id(
+        self,
+        display_name: str
+    ) -> str:
+
+        async for service in self._iter_services():
+
+            service_display_name = service.get(
+                "displayName",
+                ""
+            )
+
+            if (
+                display_name.upper()
+                in service_display_name.upper()
+            ):
+
+                return (
+                    service["name"]
+                    .split("/")[-1]
+                )
+
+        raise ValueError(
+            f"{display_name} service not found"
+        )
+
+    async def _iter_services(
+        self
+    ):
+
+        url = (
+            f"{self.BASE_URL}/services"
+        )
+        page_token = None
+
+        async with httpx.AsyncClient(
+            timeout=30
+        ) as client:
+
+            while True:
+
+                params = {
+                    "key": self.api_key,
+                    "pageSize": 1000
+                }
+
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = await client.get(
+                    url,
+                    params=params
+                )
+                response.raise_for_status()
+
+                data = response.json()
+
+                for service in data.get(
+                    "services",
+                    []
+                ):
+                    yield service
+
+                page_token = data.get(
+                    "nextPageToken"
+                )
+
+                if not page_token:
+                    break
+
+    async def _load_service_skus(
+        self,
+        service_id: str
+    ) -> list[dict]:
+
+        url = (
+            f"{self.BASE_URL}/skus"
+        )
+        page_token = None
+        skus: list[dict] = []
+
+        async with httpx.AsyncClient(
+            timeout=60
+        ) as client:
+
+            while True:
+
+                params = {
+                    "filter":
+                        f'service="services/{service_id}"',
+                    "key": self.api_key,
+                    "pageSize": 5000
+                }
+
+                if page_token:
+                    params["pageToken"] = page_token
+
+                response = await client.get(
+                    url,
+                    params=params
+                )
+                response.raise_for_status()
+
+                data = response.json()
+                skus.extend(
+                    data.get(
+                        "skus",
+                        []
+                    )
+                )
+
+                page_token = data.get(
+                    "nextPageToken"
+                )
+
+                if not page_token:
+                    break
+
+        return skus
+
+    def _sku_matches_region(
+        self,
+        sku: dict,
+        region: str
+    ) -> bool:
+
+        service_regions = sku.get(
+            "serviceRegions",
+            []
+        )
+
+        return (
+            not service_regions
+            or "global" in service_regions
+            or region in service_regions
+        )
+
+    def _sku_contains(
+        self,
+        sku: dict,
+        term: str
+    ) -> bool:
+
+        haystack = " ".join(
+            str(
+                sku.get(
+                    field,
+                    ""
+                )
+            )
+            for field in (
+                "displayName",
+                "description",
+                "category",
+                "geoTaxonomy"
+            )
+        )
+
+        return term.lower() in haystack.lower()

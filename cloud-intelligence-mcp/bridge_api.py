@@ -87,6 +87,76 @@ async def get_gcp_pricing(
                 "error":
                     "No content returned from MCP"
             }
+
+
+@app.post("/pricing/gcp/services")
+async def get_gcp_service_pricing(
+    payload: dict
+):
+
+    services = payload.get(
+        "services",
+        []
+    )
+    region = payload.get(
+        "region",
+        "us-central1"
+    )
+
+    async with streamablehttp_client(
+        "http://127.0.0.1:8000/mcp"
+    ) as (
+        read_stream,
+        write_stream,
+        _
+    ):
+
+        async with ClientSession(
+            read_stream,
+            write_stream
+        ) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                "get_gcp_service_pricing",
+                arguments={
+                    "services": services,
+                    "region": region
+                }
+            )
+
+            print("GCP Service MCP Result:")
+            print(result)
+
+            if getattr(
+                result,
+                "structuredContent",
+                None
+            ):
+                return result.structuredContent
+
+            if (
+                result.content
+                and len(result.content) > 0
+            ):
+
+                text = result.content[0].text
+
+                try:
+                    return json.loads(text)
+
+                except Exception as ex:
+
+                    return {
+                        "error":
+                            f"Unable to parse MCP response: {str(ex)}"
+                    }
+
+            return {
+                "error":
+                    "No content returned from GCP service MCP"
+            }
             
 @app.post("/pricing/azure")
 async def get_azure_pricing(
@@ -142,4 +212,63 @@ async def get_azure_pricing(
             return {
                 "error":
                     "No content returned from Azure MCP"
+            }
+
+
+@app.post("/pricing/azure/services")
+async def get_azure_service_pricing(
+    payload: dict
+):
+
+    services = payload.get(
+        "services",
+        []
+    )
+    region = payload.get(
+        "region",
+        "eastus"
+    )
+
+    async with streamablehttp_client(
+        "http://127.0.0.1:8000/mcp"
+    ) as (
+        read_stream,
+        write_stream,
+        _
+    ):
+
+        async with ClientSession(
+            read_stream,
+            write_stream
+        ) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                "get_azure_service_pricing",
+                arguments={
+                    "services": services,
+                    "region": region
+                }
+            )
+
+            print("Azure Service MCP Result:")
+            print(result)
+
+            if result.content:
+
+                text = result.content[0].text
+
+                try:
+                    return json.loads(text)
+
+                except Exception:
+
+                    return {
+                        "error": text
+                    }
+
+            return {
+                "error":
+                    "No content returned from Azure service MCP"
             }

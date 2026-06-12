@@ -52,3 +52,47 @@ class CloudMcpClient:
             response.raise_for_status()
 
             return response.json()
+
+    async def get_gcp_service_pricing(
+        self,
+        services: list[dict],
+        region: str = "us-central1"
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=120
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/pricing/gcp/services",
+                json={
+                    "services": services,
+                    "region": region
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def get_azure_service_pricing(
+        self,
+        services: list[dict],
+        region: str = "eastus"
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=60
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/pricing/azure/services",
+                json={
+                    "services": services,
+                    "region": region
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
