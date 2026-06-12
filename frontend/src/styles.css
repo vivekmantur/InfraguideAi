@@ -103,3 +103,7 @@ body {
   padding: 1.25rem;
   box-shadow: 0 24px 70px rgba(23, 32, 27, 0.26);
 }
+
+.regional-pricing-modal {
+  width: min(100%, 78rem);
+}

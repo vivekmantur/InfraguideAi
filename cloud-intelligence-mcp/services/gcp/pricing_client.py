@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 
 from services.gcp.sku_selector import (
@@ -60,6 +62,27 @@ class GcpPricingClient:
         },
     ]
 
+    COMMON_REGIONS = [
+        "us-central1",
+        "us-east1",
+        "us-east4",
+        "us-west1",
+        "us-west2",
+        "northamerica-northeast1",
+        "southamerica-east1",
+        "europe-west1",
+        "europe-west2",
+        "europe-west3",
+        "europe-west4",
+        "europe-north1",
+        "asia-south1",
+        "asia-east1",
+        "asia-east2",
+        "asia-northeast1",
+        "asia-southeast1",
+        "australia-southeast1",
+    ]
+
     def __init__(
         self,
         api_key: str
@@ -116,11 +139,6 @@ class GcpPricingClient:
                             "displayName",
                             ""
                         )
-                    )
-
-                    print(
-                        f"Service: "
-                        f"{display_name}"
                     )
 
                     if (
@@ -471,6 +489,264 @@ class GcpPricingClient:
                 ]
         }
 
+    async def get_regional_prices(
+        self,
+        cpu: int,
+        memory: int,
+        services: list[dict]
+    ) -> dict:
+
+        compute_prices = await self.get_compute_prices_by_region(
+            cpu,
+            memory
+        )
+        semaphore = asyncio.Semaphore(8)
+
+        async def build_row(
+            compute_price: dict
+        ) -> dict:
+
+            async with semaphore:
+
+                service_prices = await self.get_service_prices(
+                    compute_price["region"],
+                    services
+                )
+
+            service_monthly = service_prices.get(
+                "monthly_cost",
+                0
+            )
+            service_breakdown = [
+                {
+                    "component": item.get(
+                        "component",
+                        "Service"
+                    ),
+                    "recommended": item.get(
+                        "recommended",
+                        ""
+                    ),
+                    "monthly_cost": item.get(
+                        "monthly_cost",
+                        0
+                    ),
+                    "currency": item.get(
+                        "currency",
+                        service_prices.get(
+                            "currency",
+                            "USD"
+                        )
+                    ),
+                    "source": item.get(
+                        "source",
+                        "Google Cloud Billing API"
+                    ),
+                }
+                for item in service_prices.get(
+                    "items",
+                    []
+                )
+            ]
+            total_monthly = (
+                compute_price["monthly_cost"]
+                + service_monthly
+            )
+
+            return {
+                "provider": "GCP",
+                "region": compute_price["region"],
+                "currency": compute_price.get(
+                    "currency",
+                    "USD"
+                ),
+                "runtime_sku": compute_price.get(
+                    "machine_type",
+                    ""
+                ),
+                "runtime_monthly": round(
+                    compute_price["monthly_cost"],
+                    2
+                ),
+                "services_monthly": round(
+                    service_monthly,
+                    2
+                ),
+                "service_breakdown": service_breakdown,
+                "total_monthly": round(
+                    total_monthly,
+                    2
+                ),
+                "source": "Google Cloud Billing API",
+            }
+
+        rows = await asyncio.gather(
+            *[
+                build_row(compute_price)
+                for compute_price in compute_prices
+            ]
+        )
+
+        return {
+            "provider": "GCP",
+            "currency": (
+                rows[0]["currency"]
+                if rows
+                else "USD"
+            ),
+            "regions": sorted(
+                rows,
+                key=lambda item: item["total_monthly"]
+            )
+        }
+
+    async def get_compute_prices_by_region(
+        self,
+        cpu: int,
+        memory: int
+    ) -> list[dict]:
+
+        machine = select_machine_type(
+            cpu,
+            memory
+        )
+        service_id = await self.get_compute_service_id()
+        skus = await self._load_service_skus(
+            service_id
+        )
+
+        by_region: dict[str, dict] = {}
+
+        for sku in skus:
+
+            kind = self._compute_sku_kind(
+                sku,
+                machine["machine_family"]
+            )
+
+            if kind is None:
+
+                continue
+
+            for region in self._sku_regions(
+                sku
+            ):
+
+                if region == "global":
+
+                    continue
+
+                by_region.setdefault(
+                    region,
+                    {}
+                )[kind] = sku["skuId"]
+
+        rows = []
+
+        for region, regional_skus in by_region.items():
+
+            if (
+                "core_sku" not in regional_skus
+                or "ram_sku" not in regional_skus
+            ):
+
+                continue
+
+            try:
+
+                core_price = await self.get_sku_price(
+                    regional_skus["core_sku"]
+                )
+                ram_price = await self.get_sku_price(
+                    regional_skus["ram_sku"]
+                )
+
+            except Exception:
+
+                continue
+
+            hourly_cost = (
+                core_price["hourly_cost"]
+                * cpu
+            ) + (
+                ram_price["hourly_cost"]
+                * memory
+            )
+
+            rows.append(
+                {
+                    "region": region,
+                    "currency": core_price.get(
+                        "currency",
+                        "USD"
+                    ),
+                    "machine_type": machine[
+                        "machine_type"
+                    ],
+                    "hourly_cost": round(
+                        hourly_cost,
+                        6
+                    ),
+                    "monthly_cost": round(
+                        hourly_cost
+                        * 24
+                        * 30,
+                        2
+                    ),
+                    "core_sku": regional_skus[
+                        "core_sku"
+                    ],
+                    "ram_sku": regional_skus[
+                        "ram_sku"
+                    ],
+                }
+            )
+
+        if not rows:
+
+            fallback = await self.get_compute_price(
+                cpu,
+                memory
+            )
+
+            return [
+                {
+                    "region": region,
+                    "currency": fallback.get(
+                        "currency",
+                        "USD"
+                    ),
+                    "machine_type": fallback.get(
+                        "machine_type",
+                        machine["machine_type"]
+                    ),
+                    "hourly_cost": fallback.get(
+                        "hourly_cost",
+                        0
+                    ),
+                    "monthly_cost": fallback.get(
+                        "monthly_cost",
+                        0
+                    ),
+                    "core_sku": fallback.get(
+                        "core_sku"
+                    ),
+                    "ram_sku": fallback.get(
+                        "ram_sku"
+                    ),
+                }
+                for region in self.COMMON_REGIONS
+            ]
+
+        print(
+            f"Loaded {len(rows)} regional GCP compute prices"
+        )
+
+        return sorted(
+            rows,
+            key=lambda item: item["region"]
+        )
+
     async def get_service_prices(
         self,
         region: str,
@@ -620,9 +896,8 @@ class GcpPricingClient:
             "sku_name": sku.get(
                 "displayName"
             ),
-            "service_regions": sku.get(
-                "serviceRegions",
-                []
+            "service_regions": self._sku_regions(
+                sku
             )
         }
 
@@ -813,9 +1088,8 @@ class GcpPricingClient:
         region: str
     ) -> bool:
 
-        service_regions = sku.get(
-            "serviceRegions",
-            []
+        service_regions = self._sku_regions(
+            sku
         )
 
         return (
@@ -823,6 +1097,168 @@ class GcpPricingClient:
             or "global" in service_regions
             or region in service_regions
         )
+
+    def _sku_regions(
+        self,
+        sku: dict
+    ) -> list[str]:
+
+        service_regions = sku.get(
+            "serviceRegions",
+            []
+        )
+
+        if service_regions:
+
+            return service_regions
+
+        geo_taxonomy = sku.get(
+            "geoTaxonomy",
+            {}
+        )
+
+        if isinstance(
+            geo_taxonomy,
+            dict
+        ):
+
+            regional_metadata = geo_taxonomy.get(
+                "regionalMetadata",
+                {}
+            )
+
+            if isinstance(
+                regional_metadata,
+                dict
+            ):
+
+                region = (
+                    regional_metadata
+                    .get(
+                        "region",
+                        {}
+                    )
+                    .get(
+                        "region"
+                    )
+                )
+
+                if region:
+
+                    return [
+                        region
+                    ]
+
+            multi_regional_metadata = geo_taxonomy.get(
+                "multiRegionalMetadata",
+                {}
+            )
+
+            if isinstance(
+                multi_regional_metadata,
+                dict
+            ):
+
+                regions = [
+                    item.get(
+                        "region"
+                    )
+                    for item in multi_regional_metadata.get(
+                        "regions",
+                        []
+                    )
+                    if item.get(
+                        "region"
+                    )
+                ]
+
+                if regions:
+
+                    return regions
+
+            regions = geo_taxonomy.get(
+                "regions",
+                []
+            )
+
+            if regions:
+
+                return regions
+
+            if (
+                geo_taxonomy.get(
+                    "type",
+                    ""
+                )
+                .upper()
+                == "GLOBAL"
+            ):
+
+                return [
+                    "global"
+                ]
+
+        return []
+
+    def _compute_sku_kind(
+        self,
+        sku: dict,
+        machine_family: str
+    ) -> str | None:
+
+        display_name = (
+            sku.get(
+                "displayName",
+                ""
+            )
+            .upper()
+        )
+        family = machine_family.upper()
+
+        excluded_terms = [
+            "SPOT",
+            "PREEMPTIBLE",
+            "CUSTOM",
+            "SOLE TENANCY",
+            "COMMITTED",
+            "COMMITMENT",
+            "PREMIUM",
+            "OVERCOMMIT",
+        ]
+
+        if any(
+            term in display_name
+            for term in excluded_terms
+        ):
+
+            return None
+
+        if (
+            family == "N2"
+            and "N2D" in display_name
+        ):
+
+            return None
+
+        if (
+            family == "E2"
+            and "E2D" in display_name
+        ):
+
+            return None
+
+        if f"{family} INSTANCE CORE" in display_name:
+
+            return "core_sku"
+
+        if (
+            f"{family} INSTANCE RAM" in display_name
+            or f"{family} INSTANCE MEMORY" in display_name
+        ):
+
+            return "ram_sku"
+
+        return None
 
     def _sku_contains(
         self,

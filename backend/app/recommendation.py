@@ -346,10 +346,25 @@ async def _cost_estimate(
 
 
 
-    if analysis.cloud_sizing:
+    if provider in {"GCP", "Azure"}:
 
-        cpu = analysis.cloud_sizing.cpu_cores
-        memory = analysis.cloud_sizing.memory_gb
+        cloud_sizing = (
+            analysis.cloud_sizing
+            if analysis.cloud_sizing
+            else CloudSizingRequirements()
+        )
+
+        if not analysis.cloud_sizing:
+
+            print(
+                "Cloud sizing was not detected. "
+                "Using default sizing for live pricing: "
+                f"{cloud_sizing.cpu_cores} vCPU, "
+                f"{cloud_sizing.memory_gb} GB RAM."
+            )
+
+        cpu = cloud_sizing.cpu_cores
+        memory = cloud_sizing.memory_gb
 
         mcp_client = CloudMcpClient()
 
@@ -359,10 +374,23 @@ async def _cost_estimate(
 
         if provider == "GCP":
 
-            pricing = await mcp_client.get_gcp_compute_pricing(
-                cpu=cpu,
-                memory=memory
-            )
+            try:
+
+                pricing = await mcp_client.get_gcp_compute_pricing(
+                    cpu=cpu,
+                    memory=memory
+                )
+
+            except Exception as ex:
+
+                pricing = {
+                    "error": str(ex)
+                }
+                print(
+                    "GCP compute pricing request failed before "
+                    "a usable response was returned:"
+                )
+                print(ex)
 
             print(
                 "GCP Pricing Response:",
@@ -386,6 +414,8 @@ async def _cost_estimate(
                 additional_monthly = 0
                 additional_line_items: list[str] = []
                 additional_assumptions: list[str] = []
+                regional_prices: list[dict] = []
+                billable_services: list[ServiceRecommendation] = []
 
                 if services:
 
@@ -442,6 +472,41 @@ async def _cost_estimate(
                         )
                         print(service_pricing)
 
+                try:
+
+                    regional_pricing = await mcp_client.get_gcp_regional_pricing(
+                        cpu=cpu,
+                        memory=memory,
+                        services=[
+                            service.model_dump()
+                            for service in billable_services
+                        ]
+                    )
+
+                    if (
+                        isinstance(regional_pricing, dict)
+                        and "error" not in regional_pricing
+                    ):
+
+                        regional_prices = regional_pricing.get(
+                            "regions",
+                            []
+                        )
+
+                    elif regional_pricing:
+
+                        print(
+                            "GCP regional pricing returned error:"
+                        )
+                        print(regional_pricing)
+
+                except Exception as ex:
+
+                    print(
+                        "GCP regional pricing failed:"
+                    )
+                    print(ex)
+
                 total_monthly = monthly + additional_monthly
 
                 lower = int(total_monthly * 0.9)
@@ -482,6 +547,7 @@ async def _cost_estimate(
                             "Google Cloud Billing API"
                         )
                     ] + additional_assumptions,
+                    regional_prices=regional_prices,
                 )
 
             else:
@@ -503,10 +569,23 @@ async def _cost_estimate(
 
         elif provider == "Azure":
 
-            pricing = await mcp_client.get_azure_vm_pricing(
-                cpu=cpu,
-                memory=memory
-            )
+            try:
+
+                pricing = await mcp_client.get_azure_vm_pricing(
+                    cpu=cpu,
+                    memory=memory
+                )
+
+            except Exception as ex:
+
+                pricing = {
+                    "error": str(ex)
+                }
+                print(
+                    "Azure VM pricing request failed before "
+                    "a usable response was returned:"
+                )
+                print(ex)
 
             print(
                 "Azure Pricing Response:",
@@ -530,6 +609,8 @@ async def _cost_estimate(
                 additional_monthly = 0
                 additional_line_items: list[str] = []
                 additional_assumptions: list[str] = []
+                regional_prices: list[dict] = []
+                billable_services: list[ServiceRecommendation] = []
 
                 if services:
 
@@ -590,6 +671,41 @@ async def _cost_estimate(
                         )
                         print(service_pricing)
 
+                try:
+
+                    regional_pricing = await mcp_client.get_azure_regional_pricing(
+                        cpu=cpu,
+                        memory=memory,
+                        services=[
+                            service.model_dump()
+                            for service in billable_services
+                        ]
+                    )
+
+                    if (
+                        isinstance(regional_pricing, dict)
+                        and "error" not in regional_pricing
+                    ):
+
+                        regional_prices = regional_pricing.get(
+                            "regions",
+                            []
+                        )
+
+                    elif regional_pricing:
+
+                        print(
+                            "Azure regional pricing returned error:"
+                        )
+                        print(regional_pricing)
+
+                except Exception as ex:
+
+                    print(
+                        "Azure regional pricing failed:"
+                    )
+                    print(ex)
+
                 total_monthly = monthly + additional_monthly
 
                 lower = int(total_monthly * 0.9)
@@ -634,6 +750,7 @@ async def _cost_estimate(
                             "Azure Retail Pricing API"
                         )
                     ] + additional_assumptions,
+                    regional_prices=regional_prices,
                 )
 
             else:

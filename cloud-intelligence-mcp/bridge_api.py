@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from mcp import ClientSession
 from mcp.client.streamable_http import (
     streamablehttp_client
@@ -7,6 +7,28 @@ from mcp.client.streamable_http import (
 import json
 
 app = FastAPI()
+
+
+@app.middleware("http")
+async def log_bridge_errors(
+    request: Request,
+    call_next
+):
+
+    try:
+
+        return await call_next(
+            request
+        )
+
+    except Exception as ex:
+
+        print(
+            f"Bridge API error for "
+            f"{request.method} {request.url.path}:"
+        )
+        print(ex)
+        raise
 
 
 @app.post("/pricing/gcp")
@@ -157,6 +179,75 @@ async def get_gcp_service_pricing(
                 "error":
                     "No content returned from GCP service MCP"
             }
+
+
+@app.post("/pricing/gcp/regions")
+async def get_gcp_regional_pricing(
+    payload: dict
+):
+
+    cpu = payload["cpu"]
+    memory = payload["memory"]
+    services = payload.get(
+        "services",
+        []
+    )
+
+    async with streamablehttp_client(
+        "http://127.0.0.1:8000/mcp"
+    ) as (
+        read_stream,
+        write_stream,
+        _
+    ):
+
+        async with ClientSession(
+            read_stream,
+            write_stream
+        ) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                "get_gcp_regional_pricing",
+                arguments={
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services
+                }
+            )
+
+            print("GCP Regional MCP Result:")
+            print(result)
+
+            if getattr(
+                result,
+                "structuredContent",
+                None
+            ):
+                return result.structuredContent
+
+            if (
+                result.content
+                and len(result.content) > 0
+            ):
+
+                text = result.content[0].text
+
+                try:
+                    return json.loads(text)
+
+                except Exception as ex:
+
+                    return {
+                        "error":
+                            f"Unable to parse MCP response: {str(ex)}"
+                    }
+
+            return {
+                "error":
+                    "No content returned from GCP regional MCP"
+            }
             
 @app.post("/pricing/azure")
 async def get_azure_pricing(
@@ -271,4 +362,62 @@ async def get_azure_service_pricing(
             return {
                 "error":
                     "No content returned from Azure service MCP"
+            }
+
+
+@app.post("/pricing/azure/regions")
+async def get_azure_regional_pricing(
+    payload: dict
+):
+
+    cpu = payload["cpu"]
+    memory = payload["memory"]
+    services = payload.get(
+        "services",
+        []
+    )
+
+    async with streamablehttp_client(
+        "http://127.0.0.1:8000/mcp"
+    ) as (
+        read_stream,
+        write_stream,
+        _
+    ):
+
+        async with ClientSession(
+            read_stream,
+            write_stream
+        ) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                "get_azure_regional_pricing",
+                arguments={
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services
+                }
+            )
+
+            print("Azure Regional MCP Result:")
+            print(result)
+
+            if result.content:
+
+                text = result.content[0].text
+
+                try:
+                    return json.loads(text)
+
+                except Exception:
+
+                    return {
+                        "error": text
+                    }
+
+            return {
+                "error":
+                    "No content returned from Azure regional MCP"
             }

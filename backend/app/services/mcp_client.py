@@ -75,6 +75,30 @@ class CloudMcpClient:
 
             return response.json()
 
+    async def get_gcp_regional_pricing(
+        self,
+        cpu: int,
+        memory: int,
+        services: list[dict]
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=180
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/pricing/gcp/regions",
+                json={
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
     async def get_azure_service_pricing(
         self,
         services: list[dict],
@@ -90,6 +114,30 @@ class CloudMcpClient:
                 json={
                     "services": services,
                     "region": region
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def get_azure_regional_pricing(
+        self,
+        cpu: int,
+        memory: int,
+        services: list[dict]
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=180
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/pricing/azure/regions",
+                json={
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services
                 }
             )
 

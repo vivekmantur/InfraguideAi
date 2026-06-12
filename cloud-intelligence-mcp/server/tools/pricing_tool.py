@@ -113,3 +113,95 @@ def register_pricing_tools(mcp):
                 "provider": "GCP",
                 "error": str(ex)
             }
+
+    @mcp.tool()
+    async def get_azure_service_pricing(
+        services: list[dict],
+        region: str = "eastus"
+    ) -> dict:
+
+        try:
+
+            result = await azure_client.get_service_prices(
+                region,
+                services
+            )
+
+            print("Azure Service Pricing Result:")
+            print(result)
+
+            return result
+
+        except Exception as ex:
+
+            print("Azure Service Pricing Error:")
+            print(ex)
+
+            return {
+                "provider": "Azure",
+                "error": str(ex)
+            }
+
+    @mcp.tool()
+    async def get_azure_regional_pricing(
+        cpu: int,
+        memory: int,
+        services: list[dict]
+    ) -> dict:
+
+        try:
+
+            vm_sku = select_vm_size(
+                cpu,
+                memory
+            )
+
+            result = await azure_client.get_regional_prices(
+                vm_sku,
+                services
+            )
+
+            print("Azure Regional Pricing Result:")
+            print(result)
+
+            return result
+
+        except Exception as ex:
+
+            print("Azure Regional Pricing Error:")
+            print(ex)
+
+            return {
+                "provider": "Azure",
+                "error": str(ex)
+            }
+
+    @mcp.tool()
+    async def get_gcp_regional_pricing(
+        cpu: int,
+        memory: int,
+        services: list[dict]
+    ) -> dict:
+
+        try:
+
+            result = await gcp_client.get_regional_prices(
+                cpu,
+                memory,
+                services
+            )
+
+            print("GCP Regional Pricing Result:")
+            print(result)
+
+            return result
+
+        except Exception as ex:
+
+            print("GCP Regional Pricing Error:")
+            print(ex)
+
+            return {
+                "provider": "GCP",
+                "error": str(ex)
+            }

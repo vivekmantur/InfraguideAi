@@ -21,6 +21,26 @@ type ServiceRecommendation = {
   recommended: string;
 };
 
+type RegionalPrice = {
+  provider?: string;
+  region: string;
+  currency: string;
+  runtime_sku?: string;
+  runtime_monthly: number;
+  services_monthly: number;
+  service_breakdown?: RegionalServicePrice[];
+  total_monthly: number;
+  source?: string;
+};
+
+type RegionalServicePrice = {
+  component: string;
+  recommended?: string;
+  currency?: string;
+  monthly_cost: number;
+  source?: string;
+};
+
 type Assessment = {
   technology_stack: {
     project_summary?: string;
@@ -56,6 +76,7 @@ type Assessment = {
     annual: number;
     line_items?: string[];
     assumptions?: string[];
+    regional_prices?: RegionalPrice[];
   };
   governance_assessment?: {
     risk_level: string;
@@ -420,6 +441,7 @@ function Select({ label, value, values, onChange }: { label: string; value: stri
 }
 
 function Report({ assessment, onDownload }: { assessment: Assessment; onDownload: () => void }) {
+  const [isPricingModalOpen, setIsPricingModalOpen] = React.useState(false);
   const governance = assessment.governance_assessment ?? {
     risk_level: "Not assessed",
     issues: [],
@@ -478,7 +500,18 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
           </div>
         </Panel>
 
-        <Panel title="Cost And Strategy">
+        <Panel
+          title="Cost And Strategy"
+          action={
+            <button
+              type="button"
+              className="rounded-md border border-moss px-3 py-1.5 text-sm font-semibold text-moss transition hover:bg-moss hover:text-white disabled:cursor-not-allowed disabled:opacity-50"
+              onClick={() => setIsPricingModalOpen(true)}
+            >
+              View more
+            </button>
+          }
+        >
           <KeyValue label="Provider" value={assessment.recommended_provider} />
           <KeyValue label="Strategy" value={assessment.migration_strategy} />
           <KeyValue label="Monthly" value={`INR ${assessment.cost_estimation.monthly.toLocaleString("en-IN")}`} />
@@ -512,6 +545,14 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
           {assessment.warnings.join(" ")}
         </div>
       )}
+
+      {isPricingModalOpen && (
+        <RegionalPricingModal
+          provider={assessment.recommended_provider}
+          prices={assessment.cost_estimation.regional_prices ?? []}
+          onClose={() => setIsPricingModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
@@ -536,13 +577,128 @@ function BlueprintPreview({ assessment, className = "" }: { assessment: Assessme
   );
 }
 
-function Panel({ title, children, className = "" }: { title: string; children: React.ReactNode; className?: string }) {
+function RegionalPricingModal({ provider, prices, onClose }: { provider: string; prices: RegionalPrice[]; onClose: () => void }) {
+  const [selectedRegion, setSelectedRegion] = React.useState<RegionalPrice | null>(prices[0] ?? null);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel regional-pricing-modal" role="dialog" aria-modal="true" aria-labelledby="regionalPricingTitle">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h2 id="regionalPricingTitle" className="text-xl font-semibold">{provider} regional pricing</h2>
+            <p className="mt-1 text-sm text-ink/65">Monthly estimate by region for runtime and recommended services.</p>
+          </div>
+          <button type="button" className="clear-folder-button" onClick={onClose} aria-label="Close regional pricing dialog">
+            <X size={16} />
+          </button>
+        </div>
+
+        {prices.length > 0 ? (
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
+            <div className="overflow-x-hidden overflow-y-auto rounded-md border border-ink/10">
+              <table className="w-full table-fixed border-collapse text-left text-sm">
+                <thead className="bg-cloud text-xs uppercase text-ink/60">
+                  <tr>
+                    <th className="w-[23%] px-3 py-3 font-bold">Region</th>
+                    <th className="w-[20%] px-3 py-3 font-bold">Runtime SKU</th>
+                    <th className="w-[14%] px-3 py-3 text-right font-bold">Runtime</th>
+                    <th className="w-[16%] px-3 py-3 text-right font-bold">Services Total</th>
+                    <th className="w-[14%] px-3 py-3 text-right font-bold">Total</th>
+                    <th className="w-[13%] px-3 py-3 font-bold">Source</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {prices.map((price) => {
+                    const isSelected = selectedRegion?.region === price.region;
+
+                    return (
+                      <tr
+                        key={`${price.provider ?? provider}-${price.region}`}
+                        className={`cursor-pointer border-t border-ink/10 transition hover:bg-cloud ${isSelected ? "bg-cloud" : ""}`}
+                        onClick={() => setSelectedRegion(price)}
+                      >
+                        <td className="break-words px-3 py-3 font-semibold text-moss">{price.region}</td>
+                        <td className="break-words px-3 py-3 text-ink/70">{price.runtime_sku || "Runtime"}</td>
+                        <td className="px-3 py-3 text-right">{formatMoney(price.currency, price.runtime_monthly)}</td>
+                        <td className="px-3 py-3 text-right">{formatMoney(price.currency, price.services_monthly)}</td>
+                        <td className="px-3 py-3 text-right font-bold">{formatMoney(price.currency, price.total_monthly)}</td>
+                        <td className="break-words px-3 py-3 text-ink/65">{price.source ?? "Pricing API"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <RegionServiceBreakdown price={selectedRegion} />
+          </div>
+        ) : (
+          <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
+            Regional pricing rows were not returned for this assessment. Regenerate the blueprint after restarting the backend, MCP server, and bridge so the latest regional pricing endpoints are active.
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function RegionServiceBreakdown({ price }: { price: RegionalPrice | null }) {
+  if (!price) {
+    return (
+      <aside className="rounded-md border border-ink/10 bg-cloud p-4 text-sm text-ink/65">
+        Select a region to view service costs.
+      </aside>
+    );
+  }
+
+  return (
+    <aside className="rounded-md border border-ink/10 p-4">
+      <div className="mb-4">
+        <h3 className="text-lg font-semibold">{price.region}</h3>
+        <p className="mt-1 text-sm text-ink/65">Service cost breakdown for this region.</p>
+      </div>
+
+      <KeyValue label="Runtime" value={formatMoney(price.currency, price.runtime_monthly)} />
+      <KeyValue label="Services Total" value={formatMoney(price.currency, price.services_monthly)} />
+      <KeyValue label="Total" value={formatMoney(price.currency, price.total_monthly)} />
+
+      <div className="mt-4 space-y-3">
+        {(price.service_breakdown ?? []).length > 0 ? (
+          price.service_breakdown?.map((service) => (
+            <div key={`${price.region}-${service.component}`} className="rounded-md bg-cloud p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="font-semibold">{service.component}</div>
+                  {service.recommended && (
+                    <div className="mt-1 text-xs leading-5 text-ink/60">{service.recommended}</div>
+                  )}
+                </div>
+                <div className="text-right font-bold">
+                  {formatMoney(service.currency ?? price.currency, service.monthly_cost)}
+                </div>
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-md bg-cloud p-3 text-sm leading-6 text-ink/65">
+            Per-service rows were not returned for this region. Regenerate the assessment after restarting MCP and bridge so the latest service breakdown response is active.
+          </div>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function Panel({ title, children, className = "", action }: { title: string; children: React.ReactNode; className?: string; action?: React.ReactNode }) {
   return (
     <section className={`rounded-lg border border-ink/10 p-4 ${className}`}>
-      <h3 className="mb-4 flex items-center gap-2 text-lg font-semibold">
-        <FileText size={18} className="text-signal" />
-        {title}
-      </h3>
+      <div className="mb-4 flex items-center justify-between gap-3">
+        <h3 className="flex items-center gap-2 text-lg font-semibold">
+          <FileText size={18} className="text-signal" />
+          {title}
+        </h3>
+        {action}
+      </div>
       {children}
     </section>
   );
@@ -570,6 +726,10 @@ function List({ items = [], numbered = false }: { items?: string[]; numbered?: b
 
 function list(items?: string[]) {
   return items?.length ? items.join(", ") : "Not detected";
+}
+
+function formatMoney(currency: string, amount: number) {
+  return `${currency} ${amount.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
 }
 
 function analyzableFiles(files: File[]) {

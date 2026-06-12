@@ -91,13 +91,13 @@ async def create_uploaded_assessment(
         if saved_files == 0:
             raise HTTPException(status_code=400, detail="No analyzable files were found after ignoring dependency and build folders.")
 
-        analysis, warnings =analysis, warnings = analyze_local_repository(
+        analysis, warnings = analyze_local_repository(
             tmp_dir,
             f"Uploaded folder: {project_name}",
             parsed_requirements
         )
         request = FolderAssessmentRequest(project_name=project_name, requirements=parsed_requirements)
-        return build_assessment(request, analysis, warnings)
+        return await build_assessment(request, analysis, warnings)
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 

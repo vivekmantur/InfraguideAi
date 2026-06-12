@@ -124,6 +124,7 @@ class CostEstimate(BaseModel):
     annual: int
     line_items: List[str] = Field(default_factory=list)
     assumptions: List[str]
+    regional_prices: List[dict] = Field(default_factory=list)
 
 
 class GovernanceAssessment(BaseModel):

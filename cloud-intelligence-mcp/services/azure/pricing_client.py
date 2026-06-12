@@ -1,3 +1,5 @@
+import asyncio
+
 import httpx
 
 
@@ -180,6 +182,206 @@ class AzurePricingClient:
                     "effectiveStartDate"
                 )
             }
+
+    async def get_regional_prices(
+        self,
+        vm_sku: str,
+        services: list[dict]
+    ) -> dict:
+
+        vm_prices = await self.get_vm_prices_by_region(
+            vm_sku
+        )
+        semaphore = asyncio.Semaphore(8)
+
+        async def build_row(
+            vm_price: dict
+        ) -> dict:
+
+            async with semaphore:
+
+                service_prices = await self.get_service_prices(
+                    vm_price["region"],
+                    services
+                )
+
+            service_monthly = service_prices.get(
+                "monthly_cost",
+                0
+            )
+            service_breakdown = [
+                {
+                    "component": item.get(
+                        "component",
+                        "Service"
+                    ),
+                    "recommended": item.get(
+                        "recommended",
+                        ""
+                    ),
+                    "monthly_cost": item.get(
+                        "monthly_cost",
+                        0
+                    ),
+                    "currency": item.get(
+                        "currency",
+                        service_prices.get(
+                            "currency",
+                            "USD"
+                        )
+                    ),
+                    "source": item.get(
+                        "source",
+                        "Azure Retail Pricing API"
+                    ),
+                }
+                for item in service_prices.get(
+                    "items",
+                    []
+                )
+            ]
+            total_monthly = (
+                vm_price["monthly_cost"]
+                + service_monthly
+            )
+
+            return {
+                "provider": "Azure",
+                "region": vm_price["region"],
+                "currency": vm_price.get(
+                    "currency",
+                    "USD"
+                ),
+                "runtime_sku": vm_sku,
+                "runtime_monthly": round(
+                    vm_price["monthly_cost"],
+                    2
+                ),
+                "services_monthly": round(
+                    service_monthly,
+                    2
+                ),
+                "service_breakdown": service_breakdown,
+                "total_monthly": round(
+                    total_monthly,
+                    2
+                ),
+                "source": "Azure Retail Pricing API",
+            }
+
+        rows = await asyncio.gather(
+            *[
+                build_row(vm_price)
+                for vm_price in vm_prices
+            ]
+        )
+
+        return {
+            "provider": "Azure",
+            "currency": (
+                rows[0]["currency"]
+                if rows
+                else "USD"
+            ),
+            "regions": sorted(
+                rows,
+                key=lambda item: item["total_monthly"]
+            )
+        }
+
+    async def get_vm_prices_by_region(
+        self,
+        vm_sku: str
+    ) -> list[dict]:
+
+        filter_query = (
+            f"serviceName eq 'Virtual Machines' "
+            f"and armSkuName eq '{vm_sku}'"
+        )
+
+        async with httpx.AsyncClient(
+            timeout=60
+        ) as client:
+
+            items = await self._get_all_retail_items(
+                client,
+                filter_query
+            )
+
+        regional_items: dict[str, dict] = {}
+
+        for item in items:
+
+            region = item.get(
+                "armRegionName"
+            )
+
+            if not region:
+
+                continue
+
+            if not self._is_primary_consumption_item(
+                item
+            ):
+
+                continue
+
+            current = regional_items.get(
+                region
+            )
+
+            if (
+                current is None
+                or item.get(
+                    "retailPrice",
+                    0
+                )
+                < current.get(
+                    "retailPrice",
+                    0
+                )
+            ):
+                regional_items[region] = item
+
+        if not regional_items:
+
+            raise ValueError(
+                f"No regional pricing found for {vm_sku}"
+            )
+
+        rows = []
+
+        for region, item in regional_items.items():
+
+            hourly_cost = item.get(
+                "retailPrice",
+                0
+            )
+
+            rows.append(
+                {
+                    "region": region,
+                    "currency": item.get(
+                        "currencyCode",
+                        "USD"
+                    ),
+                    "hourly_cost": round(
+                        hourly_cost,
+                        6
+                    ),
+                    "monthly_cost": round(
+                        hourly_cost
+                        * 24
+                        * 30,
+                        2
+                    ),
+                }
+            )
+
+        return sorted(
+            rows,
+            key=lambda item: item["region"]
+        )
 
     async def get_service_prices(
         self,
@@ -422,6 +624,69 @@ class AzurePricingClient:
             preferred[0]
             if preferred
             else candidates[0]
+        )
+
+    async def _get_all_retail_items(
+        self,
+        client: httpx.AsyncClient,
+        filter_query: str
+    ) -> list[dict]:
+
+        items: list[dict] = []
+        next_url = self.BASE_URL
+        params = {
+            "$filter": filter_query
+        }
+
+        while next_url:
+
+            response = await client.get(
+                next_url,
+                params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+            items.extend(
+                data.get(
+                    "Items",
+                    []
+                )
+            )
+            next_url = data.get(
+                "NextPageLink"
+            )
+            params = None
+
+        return items
+
+    def _is_primary_consumption_item(
+        self,
+        item: dict
+    ) -> bool:
+
+        return (
+            item.get("type") == "Consumption"
+            and (
+                "Spot"
+                not in item.get(
+                    "skuName",
+                    ""
+                )
+            )
+            and (
+                "Low Priority"
+                not in item.get(
+                    "skuName",
+                    ""
+                )
+            )
+            and (
+                "Reservation"
+                not in item.get(
+                    "meterName",
+                    ""
+                )
+            )
         )
 
     def _item_contains(
