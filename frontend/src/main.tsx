@@ -15,6 +15,8 @@ type Requirements = {
   migration_timeline: string;
 };
 
+type SourceMode = "github" | "folder";
+
 type ServiceRecommendation = {
   component: string;
   current: string;
@@ -71,6 +73,7 @@ type Assessment = {
   recommended_provider: string;
   recommended_services: ServiceRecommendation[];
   cost_estimation: {
+    currency: string;
     monthly: number;
     monthly_range?: string;
     annual: number;
@@ -97,14 +100,40 @@ type Assessment = {
 };
 
 const options = {
-  cloud_provider: ["No Preference", "AWS", "Azure", "GCP"],
+  cloud_provider: ["AWS", "Azure", "GCP"],
   migration_goal: ["Application Modernization", "Cost Optimization", "Lift-and-Shift", "Scalability", "Performance Improvement"],
   expected_traffic: ["Low", "Medium", "High"],
   budget_preference: ["Balanced", "Low Cost", "Performance Focused"],
   migration_timeline: ["3 Months", "Immediate", "6 Months", "Flexible"],
 };
 
+const requiredFieldMessage = "Required field missing";
+
+const emptyRequirements = (): Requirements => ({
+  cloud_provider: "",
+  migration_goal: "",
+  expected_traffic: "",
+  budget_preference: "",
+  migration_timeline: "",
+});
+
 const pricingRegions: Record<string, string[]> = {
+  AWS: [
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "sa-east-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "eu-north-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1",
+  ],
   Azure: [
     "eastus",
     "eastus2",
@@ -152,25 +181,30 @@ const pricingRegions: Record<string, string[]> = {
 };
 
 function App() {
-  const [sourceMode, setSourceMode] = React.useState<"github" | "folder">("github");
+  const [sourceMode, setSourceMode] = React.useState<SourceMode>("github");
   const [repositoryUrl, setRepositoryUrl] = React.useState("");
   const [githubToken, setGithubToken] = React.useState("");
   const [selectedFiles, setSelectedFiles] = React.useState<File[]>([]);
   const folderInputRef = React.useRef<HTMLInputElement | null>(null);
-  const [requirements, setRequirements] = React.useState<Requirements>({
-    cloud_provider: "No Preference",
-    migration_goal: "Application Modernization",
-    expected_traffic: "Medium",
-    budget_preference: "Balanced",
-    migration_timeline: "3 Months",
-  });
+  const [githubRequirements, setGithubRequirements] = React.useState<Requirements>(emptyRequirements);
+  const [folderRequirements, setFolderRequirements] = React.useState<Requirements>(emptyRequirements);
+  const [fieldErrors, setFieldErrors] = React.useState<Partial<Record<keyof Requirements | "repositoryUrl" | "projectFolder", string>>>({});
   const [assessment, setAssessment] = React.useState<Assessment | null>(null);
   const [isLoading, setIsLoading] = React.useState(false);
   const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
   const [error, setError] = React.useState("");
+  const requirements = sourceMode === "github" ? githubRequirements : folderRequirements;
 
   async function submitAssessment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const validationErrors = validateMigrationInput();
+
+    if (Object.keys(validationErrors).length > 0) {
+      setFieldErrors(validationErrors);
+      setError("");
+      return;
+    }
+
     setIsLoading(true);
     setError("");
 
@@ -278,14 +312,49 @@ function App() {
   }
 
   function updateRequirement(key: keyof Requirements, value: string) {
-    setRequirements((current) => ({ ...current, [key]: value }));
+    const update = (current: Requirements) => ({ ...current, [key]: value });
+
+    if (sourceMode === "github") {
+      setGithubRequirements(update);
+    } else {
+      setFolderRequirements(update);
+    }
+
+    setFieldErrors((current) => ({ ...current, [key]: value ? "" : requiredFieldMessage }));
+  }
+
+  function switchSourceMode(mode: SourceMode) {
+    setSourceMode(mode);
+    setFieldErrors({});
+    setError("");
   }
 
   function clearSelectedFolder() {
     setSelectedFiles([]);
+    setFieldErrors((current) => ({ ...current, projectFolder: requiredFieldMessage }));
     if (folderInputRef.current) {
       folderInputRef.current.value = "";
     }
+  }
+
+  function validateMigrationInput() {
+    const errors: Partial<Record<keyof Requirements | "repositoryUrl" | "projectFolder", string>> = {};
+
+    if (sourceMode === "github" && !repositoryUrl.trim()) {
+      errors.repositoryUrl = requiredFieldMessage;
+    }
+
+    if (sourceMode === "folder" && selectedFiles.length === 0) {
+      errors.projectFolder = requiredFieldMessage;
+    }
+
+    (Object.keys(requirements) as Array<keyof Requirements>).forEach((key) => {
+      if (!requirements[key]) {
+        errors[key] = requiredFieldMessage;
+      }
+    });
+
+    return errors;
   }
 
   const uploadableFiles = React.useMemo(() => analyzableFiles(selectedFiles), [selectedFiles]);
@@ -331,35 +400,42 @@ function App() {
           </div>
 
           <div className="mb-5 grid grid-cols-2 rounded-md border border-ink/10 bg-cloud p-1">
-            <button type="button" className={`source-tab ${sourceMode === "github" ? "source-tab-active" : ""}`} onClick={() => setSourceMode("github")}>
+            <button type="button" className={`source-tab ${sourceMode === "github" ? "source-tab-active" : ""}`} onClick={() => switchSourceMode("github")}>
               GitHub URL
             </button>
-            <button type="button" className={`source-tab ${sourceMode === "folder" ? "source-tab-active" : ""}`} onClick={() => setSourceMode("folder")}>
+            <button type="button" className={`source-tab ${sourceMode === "folder" ? "source-tab-active" : ""}`} onClick={() => switchSourceMode("folder")}>
               Upload Folder
             </button>
           </div>
 
           {sourceMode === "github" ? (
             <>
-              <label className="field-label" htmlFor="repositoryUrl">GitHub Repository</label>
+              <RequiredLabel htmlFor="repositoryUrl">GitHub Repository</RequiredLabel>
               <input
                 id="repositoryUrl"
-                className="input"
+                className={`input ${fieldErrors.repositoryUrl ? "input-error" : ""}`}
                 value={repositoryUrl}
-                onChange={(event) => setRepositoryUrl(event.target.value)}
+                onChange={(event) => {
+                  setRepositoryUrl(event.target.value);
+                  setFieldErrors((current) => ({ ...current, repositoryUrl: event.target.value.trim() ? "" : requiredFieldMessage }));
+                }}
                 placeholder="https://github.com/company/ecommerce-app"
-                required
               />
+              {fieldErrors.repositoryUrl && <FieldError message={fieldErrors.repositoryUrl} />}
             </>
           ) : (
             <label>
-              <span className="field-label">Project Folder</span>
+              <RequiredLabel>Project Folder</RequiredLabel>
               <input
                 ref={folderInputRef}
-                className="input file-input"
+                className={`input file-input ${fieldErrors.projectFolder ? "input-error" : ""}`}
                 type="file"
                 multiple
-                onChange={(event) => setSelectedFiles(Array.from(event.target.files ?? []))}
+                onChange={(event) => {
+                  const files = Array.from(event.target.files ?? []);
+                  setSelectedFiles(files);
+                  setFieldErrors((current) => ({ ...current, projectFolder: files.length > 0 ? "" : requiredFieldMessage }));
+                }}
                 {...{ webkitdirectory: "", directory: "" }}
               />
               {selectedFiles.length > 0 ? (
@@ -374,18 +450,19 @@ function App() {
               ) : (
                 <span className="mt-2 block text-sm text-ink/60">Choose a local project folder to scan.</span>
               )}
+              {fieldErrors.projectFolder && <FieldError message={fieldErrors.projectFolder} />}
             </label>
           )}
 
           <div className="mt-5 grid gap-4">
-            <Select label="Cloud Provider" value={requirements.cloud_provider} values={options.cloud_provider} onChange={(value) => updateRequirement("cloud_provider", value)} />
-            <Select label="Migration Goal" value={requirements.migration_goal} values={options.migration_goal} onChange={(value) => updateRequirement("migration_goal", value)} />
-            <Select label="Expected Traffic" value={requirements.expected_traffic} values={options.expected_traffic} onChange={(value) => updateRequirement("expected_traffic", value)} />
-            <Select label="Budget Preference" value={requirements.budget_preference} values={options.budget_preference} onChange={(value) => updateRequirement("budget_preference", value)} />
-            <Select label="Migration Timeline" value={requirements.migration_timeline} values={options.migration_timeline} onChange={(value) => updateRequirement("migration_timeline", value)} />
+            <Select label="Cloud Provider" value={requirements.cloud_provider} values={options.cloud_provider} placeholder="Select cloud provider" error={fieldErrors.cloud_provider} onChange={(value) => updateRequirement("cloud_provider", value)} />
+            <Select label="Migration Goal" value={requirements.migration_goal} values={options.migration_goal} placeholder="Select migration goal" error={fieldErrors.migration_goal} onChange={(value) => updateRequirement("migration_goal", value)} />
+            <Select label="Expected Traffic" value={requirements.expected_traffic} values={options.expected_traffic} placeholder="Select expected traffic" error={fieldErrors.expected_traffic} onChange={(value) => updateRequirement("expected_traffic", value)} />
+            <Select label="Budget Preference" value={requirements.budget_preference} values={options.budget_preference} placeholder="Select budget preference" error={fieldErrors.budget_preference} onChange={(value) => updateRequirement("budget_preference", value)} />
+            <Select label="Migration Timeline" value={requirements.migration_timeline} values={options.migration_timeline} placeholder="Select migration timeline" error={fieldErrors.migration_timeline} onChange={(value) => updateRequirement("migration_timeline", value)} />
           </div>
 
-          <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-moss px-4 py-3 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoading || (sourceMode === "folder" && selectedFiles.length === 0) || (sourceMode === "github" && !repositoryUrl.trim())}>
+          <button className="mt-6 flex w-full items-center justify-center gap-2 rounded-md bg-moss px-4 py-3 font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60" disabled={isLoading}>
             {isLoading ? <Loader2 className="animate-spin" size={18} /> : <ServerCog size={18} />}
             Generate Blueprint
           </button>
@@ -478,15 +555,46 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function Select({ label, value, values, onChange }: { label: string; value: string; values: string[]; onChange: (value: string) => void }) {
+function RequiredLabel({ children, htmlFor }: { children: React.ReactNode; htmlFor?: string }) {
+  return (
+    <span className="field-label" {...(htmlFor ? { id: `${htmlFor}Label` } : {})}>
+      {children}
+      <span className="required-star" aria-hidden="true">*</span>
+    </span>
+  );
+}
+
+function FieldError({ message }: { message: string }) {
+  return (
+    <span className="field-error">{message}</span>
+  );
+}
+
+function Select({
+  label,
+  value,
+  values,
+  placeholder,
+  error,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  values: string[];
+  placeholder: string;
+  error?: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <label>
-      <span className="field-label">{label}</span>
-      <select className="input" value={value} onChange={(event) => onChange(event.target.value)}>
+      <RequiredLabel>{label}</RequiredLabel>
+      <select className={`input ${error ? "input-error" : ""}`} value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="" disabled>{placeholder}</option>
         {values.map((item) => (
           <option key={item} value={item}>{item}</option>
         ))}
       </select>
+      {error && <FieldError message={error} />}
     </label>
   );
 }
@@ -503,10 +611,10 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
   };
   const activeMonthlyValue = appliedRegionalPrice
     ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly)
-    : `INR ${assessment.cost_estimation.monthly.toLocaleString("en-IN")}`;
+    : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.monthly);
   const activeAnnualValue = appliedRegionalPrice
     ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly * 12)
-    : `INR ${assessment.cost_estimation.annual.toLocaleString("en-IN")}`;
+    : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.annual);
   const activeRangeValue = appliedRegionalPrice
     ? `${appliedRegionalPrice.region} selected`
     : assessment.cost_estimation.monthly_range ?? "Not estimated";
@@ -680,6 +788,19 @@ function RegionalPricingModal({
   const availableRegions = pricingRegions[provider] ?? [];
 
   React.useEffect(() => {
+    if (provider === "AWS") {
+      const rows = selectedPricingRegion
+        ? initialPrices.filter((price) => price.region === selectedPricingRegion)
+        : initialPrices.slice(0, 10);
+
+      setPrices(rows);
+      setSelectedRegion((current) => rows.find((row) => row.region === current?.region) ?? rows[0] ?? null);
+      setHasLoadedRegionList(initialPrices.length > 0);
+      setRegionalError("");
+      setIsLoadingRegions(false);
+      return;
+    }
+
     if (!["Azure", "GCP"].includes(provider)) {
       return;
     }
@@ -740,7 +861,7 @@ function RegionalPricingModal({
     return () => {
       isActive = false;
     };
-  }, [cloudSizing?.cpu_cores, cloudSizing?.memory_gb, provider, selectedPricingRegion, services]);
+  }, [cloudSizing?.cpu_cores, cloudSizing?.memory_gb, initialPrices, provider, selectedPricingRegion, services]);
 
   return (
     <div className="modal-backdrop" role="presentation">

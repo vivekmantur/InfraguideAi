@@ -2,6 +2,7 @@ import asyncio
 
 import httpx
 
+from services.pricing_cache import pricing_cache
 from services.gcp.sku_selector import (
     select_machine_type
 )
@@ -230,6 +231,148 @@ class GcpPricingClient:
             f"{sku_id}/price"
         )
 
+        data = await pricing_cache.get_or_set(
+            "gcp:sku_price",
+            {
+                "sku_id": sku_id
+            },
+            lambda: self._fetch_sku_price(
+                sku_id
+            )
+        )
+
+        sku_prices = data.get(
+            "skuPrices",
+            []
+        )
+
+        if not sku_prices:
+            raise ValueError(
+                f"No pricing found "
+                f"for SKU {sku_id}"
+            )
+
+        default_prices = [
+            p for p in sku_prices
+            if (
+                p.get(
+                    "consumptionModelDescription"
+                ) == "Default"
+                or not p.get(
+                    "consumptionModelDescription"
+                )
+            )
+        ] or sku_prices
+
+        tier = None
+        first_tier = None
+
+        for sku_price in default_prices:
+
+            tiers = (
+                sku_price
+                .get(
+                    "rate",
+                    {}
+                )
+                .get(
+                    "tiers",
+                    []
+                )
+            )
+
+            if not tiers:
+                continue
+
+            if first_tier is None:
+                first_tier = tiers[0]
+
+            for candidate_tier in tiers:
+
+                list_price = (
+                    candidate_tier.get(
+                        "listPrice",
+                        {}
+                    )
+                )
+                units = float(
+                    list_price.get(
+                        "units",
+                        0
+                    )
+                )
+                nanos = float(
+                    list_price.get(
+                        "nanos",
+                        0
+                    )
+                )
+
+                if units or nanos:
+                    tier = candidate_tier
+                    break
+
+            if tier is not None:
+                break
+
+        if tier is None and first_tier is not None:
+            tier = first_tier
+
+        if tier is None:
+
+            raise ValueError(
+                f"No rate tiers found "
+                f"for SKU {sku_id}"
+            )
+
+        list_price = (
+            tier["listPrice"]
+        )
+
+        units = float(
+            list_price.get(
+                "units",
+                0
+            )
+        )
+
+        nanos = (
+            float(
+                list_price.get(
+                    "nanos",
+                    0
+                )
+            )
+            / 1_000_000_000
+        )
+
+        hourly_cost = (
+            units + nanos
+        )
+
+        result = {
+            "sku_id": sku_id,
+            "currency": data.get(
+                "currencyCode",
+                "USD"
+            ),
+            "hourly_cost":
+                hourly_cost
+        }
+
+        self._sku_price_cache[sku_id] = result
+        return result
+
+    async def _fetch_sku_price(
+        self,
+        sku_id: str
+    ) -> dict:
+
+        url = (
+            f"{self.BASE_URL}/skus/"
+            f"{sku_id}/price"
+        )
+
         async with httpx.AsyncClient(
             timeout=30
         ) as client:
@@ -242,130 +385,7 @@ class GcpPricingClient:
             )
 
             response.raise_for_status()
-
-            data = response.json()
-
-            sku_prices = data.get(
-                "skuPrices",
-                []
-            )
-
-            if not sku_prices:
-                raise ValueError(
-                    f"No pricing found "
-                    f"for SKU {sku_id}"
-                )
-
-            default_prices = [
-                p for p in sku_prices
-                if (
-                    p.get(
-                        "consumptionModelDescription"
-                    ) == "Default"
-                    or not p.get(
-                        "consumptionModelDescription"
-                    )
-                )
-            ] or sku_prices
-
-            tier = None
-            first_tier = None
-
-            for sku_price in default_prices:
-
-                tiers = (
-                    sku_price
-                    .get(
-                        "rate",
-                        {}
-                    )
-                    .get(
-                        "tiers",
-                        []
-                    )
-                )
-
-                if not tiers:
-                    continue
-
-                if first_tier is None:
-                    first_tier = tiers[0]
-
-                for candidate_tier in tiers:
-
-                    list_price = (
-                        candidate_tier.get(
-                            "listPrice",
-                            {}
-                        )
-                    )
-                    units = float(
-                        list_price.get(
-                            "units",
-                            0
-                        )
-                    )
-                    nanos = float(
-                        list_price.get(
-                            "nanos",
-                            0
-                        )
-                    )
-
-                    if units or nanos:
-                        tier = candidate_tier
-                        break
-
-                if tier is not None:
-                    break
-
-            if tier is None and first_tier is not None:
-                tier = first_tier
-
-            if tier is None:
-
-                raise ValueError(
-                    f"No rate tiers found "
-                    f"for SKU {sku_id}"
-                )
-
-            list_price = (
-                tier["listPrice"]
-            )
-
-            units = float(
-                list_price.get(
-                    "units",
-                    0
-                )
-            )
-
-            nanos = (
-                float(
-                    list_price.get(
-                        "nanos",
-                        0
-                    )
-                )
-                / 1_000_000_000
-            )
-
-            hourly_cost = (
-                units + nanos
-            )
-
-            result = {
-                "sku_id": sku_id,
-                "currency": data.get(
-                    "currencyCode",
-                    "USD"
-                ),
-                "hourly_cost":
-                    hourly_cost
-            }
-
-            self._sku_price_cache[sku_id] = result
-            return result
+            return response.json()
 
     async def find_compute_skus(
         self,
@@ -1122,10 +1142,30 @@ class GcpPricingClient:
         self
     ):
 
+        for service in await self._load_services():
+            yield service
+
+    async def _load_services(
+        self
+    ) -> list[dict]:
+
+        return await pricing_cache.get_or_set(
+            "gcp:services",
+            {
+                "page_size": 1000
+            },
+            self._fetch_services
+        )
+
+    async def _fetch_services(
+        self
+    ) -> list[dict]:
+
         url = (
             f"{self.BASE_URL}/services"
         )
         page_token = None
+        services: list[dict] = []
 
         async with httpx.AsyncClient(
             timeout=30
@@ -1149,11 +1189,12 @@ class GcpPricingClient:
 
                 data = response.json()
 
-                for service in data.get(
-                    "services",
-                    []
-                ):
-                    yield service
+                services.extend(
+                    data.get(
+                        "services",
+                        []
+                    )
+                )
 
                 page_token = data.get(
                     "nextPageToken"
@@ -1161,6 +1202,8 @@ class GcpPricingClient:
 
                 if not page_token:
                     break
+
+        return services
 
     async def _load_service_skus(
         self,
@@ -1170,6 +1213,24 @@ class GcpPricingClient:
         if service_id in self._service_skus_cache:
 
             return self._service_skus_cache[service_id]
+
+        skus = await pricing_cache.get_or_set(
+            "gcp:service_skus",
+            {
+                "service_id": service_id
+            },
+            lambda: self._fetch_service_skus(
+                service_id
+            )
+        )
+
+        self._service_skus_cache[service_id] = skus
+        return skus
+
+    async def _fetch_service_skus(
+        self,
+        service_id: str
+    ) -> list[dict]:
 
         url = (
             f"{self.BASE_URL}/skus"
@@ -1214,7 +1275,6 @@ class GcpPricingClient:
                 if not page_token:
                     break
 
-        self._service_skus_cache[service_id] = skus
         return skus
 
     def _sku_matches_region(

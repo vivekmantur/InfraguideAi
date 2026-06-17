@@ -1,6 +1,9 @@
 from __future__ import annotations
 from uuid import uuid4
-from .ai import generate_architect_reasoning
+from .ai import (
+    generate_architect_reasoning,
+    generate_aws_pricing_estimate,
+)
 from .migration_strategy import determine_migration_strategy, assess_strategy_alignment
 from app.services.mcp_client import (
     CloudMcpClient
@@ -695,6 +698,182 @@ async def _cost_estimate(
                     "Falling back to "
                     "heuristic pricing."
                 )
+    # --------------------------------------------------
+    # AWS Pricing Through Groq
+    # --------------------------------------------------
+
+    if provider == "AWS":
+
+        cloud_sizing = (
+            analysis.cloud_sizing
+            if analysis.cloud_sizing
+            else CloudSizingRequirements()
+        )
+
+        pricing_data, pricing_warnings = (
+            generate_aws_pricing_estimate(
+                analysis,
+                request.requirements,
+                [
+                    service.model_dump()
+                    for service in (services or [])
+                ],
+                cloud_sizing,
+            )
+        )
+
+        for warning in pricing_warnings:
+            print(warning)
+
+        if pricing_data:
+
+            regional_prices = [
+                row
+                for row in pricing_data.get(
+                    "regional_prices",
+                    []
+                )
+                if isinstance(
+                    row,
+                    dict
+                )
+                and row.get(
+                    "region"
+                )
+                and row.get(
+                    "total_monthly"
+                ) is not None
+            ]
+
+            if regional_prices:
+
+                regional_prices = sorted(
+                    regional_prices,
+                    key=lambda item: item.get(
+                        "total_monthly",
+                        0
+                    )
+                )
+                primary_region = regional_prices[0]
+                currency = pricing_data.get(
+                    "currency",
+                    primary_region.get(
+                        "currency",
+                        "USD"
+                    )
+                )
+                totals = [
+                    float(
+                        item.get(
+                            "total_monthly",
+                            0
+                        )
+                    )
+                    for item in regional_prices
+                ]
+                monthly = int(
+                    round(
+                        float(
+                            primary_region.get(
+                            "total_monthly",
+                            0
+                            )
+                        )
+                    )
+                )
+                annual = int(
+                    monthly * 12
+                )
+                lower = int(
+                    round(
+                        min(totals)
+                    )
+                )
+                upper = int(
+                    round(
+                        max(totals)
+                    )
+                )
+                runtime_sku = primary_region.get(
+                    "runtime_sku",
+                    "AWS runtime"
+                )
+                service_breakdown = primary_region.get(
+                    "service_breakdown",
+                    []
+                )
+                raw_line_items = pricing_data.get(
+                    "line_items",
+                    []
+                )
+                line_items = (
+                    raw_line_items
+                    if isinstance(
+                        raw_line_items,
+                        list
+                    )
+                    else []
+                ) or [
+                    (
+                        f"AWS runtime "
+                        f"({runtime_sku}) in "
+                        f"{primary_region['region']}: "
+                        f"{currency} "
+                        f"{float(primary_region.get('runtime_monthly', 0)):.2f}/month"
+                    )
+                ] + [
+                    (
+                        f"{service.get('component', 'Service')}: "
+                        f"{service.get('recommended', 'Managed service')}: "
+                        f"{service.get('currency', currency)} "
+                        f"{float(service.get('monthly_cost', 0)):.2f}/month"
+                    )
+                    for service in service_breakdown
+                ]
+                raw_assumptions = pricing_data.get(
+                    "assumptions",
+                    []
+                )
+                assumptions = (
+                    raw_assumptions
+                    if isinstance(
+                        raw_assumptions,
+                        list
+                    )
+                    else []
+                ) or [
+                    (
+                        "Summary pricing uses the lowest estimated "
+                        "AWS region from the regional comparison."
+                    ),
+                    (
+                        f"Estimated application sizing: {cloud_sizing.cpu_cores} "
+                        f"vCPU, {cloud_sizing.memory_gb} GB RAM, "
+                        f"{cloud_sizing.storage_gb} GB storage."
+                    ),
+                    (
+                        "Regional pricing was estimated by Groq using "
+                        "current AWS service pricing patterns."
+                    ),
+                ]
+
+                return CostEstimate(
+                    currency=currency,
+                    monthly=monthly,
+                    monthly_range=(
+                        f"{currency} {lower:,} - {upper:,}/month"
+                    ),
+                    annual=annual,
+                    line_items=line_items,
+                    assumptions=assumptions,
+                    regional_prices=regional_prices,
+                )
+
+        print(
+            "AWS pricing LLM estimate failed. "
+            "Falling back to heuristic pricing."
+        )
+
     # --------------------------------------------------
     # Existing heuristic pricing
     # --------------------------------------------------

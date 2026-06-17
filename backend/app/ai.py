@@ -10,6 +10,24 @@ from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_ENDPOINT
 from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, MigrationRequirements, RepositoryAnalysis,MigrationStrategyResult
 
 
+AWS_PRICING_REGIONS = [
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "sa-east-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "eu-north-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1",
+]
+
+
 def groq_model() -> str:
     return DEFAULT_MODEL
 
@@ -259,6 +277,142 @@ def answer_migration_question(assessment: AssessmentResponse, message: str, hist
     return _chat(messages, fallback=fallback, temperature=0.35)
 
 
+def generate_aws_pricing_estimate(
+    analysis: RepositoryAnalysis,
+    requirements: MigrationRequirements,
+    services: list[dict[str, str]],
+    cloud_sizing: CloudSizingRequirements,
+) -> tuple[dict[str, Any] | None, list[str]]:
+    warnings: list[str] = []
+
+    if not is_groq_configured():
+        warnings.append(
+            "Groq is not configured. Falling back to heuristic AWS pricing."
+        )
+        return None, warnings
+
+    pricing_facts = {
+        "project_summary": analysis.project_summary,
+        "languages": analysis.languages,
+        "frameworks": analysis.frameworks,
+        "runtimes": analysis.runtimes,
+        "hosting_model": analysis.hosting_model,
+        "deployment_model": analysis.deployment_model,
+        "databases": analysis.databases,
+        "container_configs": analysis.container_configs,
+        "application_type": analysis.application_type,
+        "architecture_pattern": analysis.architecture_pattern,
+        "cloud_dependencies": analysis.cloud_dependencies,
+        "storage_dependencies": analysis.storage_dependencies,
+    }
+
+    prompt = f"""
+You are estimating AWS migration pricing for a single application.
+
+Repository facts:
+{json.dumps(pricing_facts, indent=2)}
+
+Migration requirements:
+- Cloud provider: AWS
+- Traffic: {requirements.expected_traffic.value}
+- Budget: {requirements.budget_preference.value}
+- Goal: {requirements.migration_goal.value}
+- Timeline: {requirements.migration_timeline.value}
+
+Recommended services:
+{json.dumps(services, indent=2)}
+
+Sizing:
+{json.dumps(cloud_sizing.model_dump(), indent=2)}
+
+Estimate AWS on-demand monthly pricing for these regions only:
+{json.dumps(AWS_PRICING_REGIONS)}
+
+Rules:
+- Use USD.
+- Include application runtime and the recommended managed services.
+- Use conservative but realistic estimates based on current public AWS pricing patterns.
+- Runtime should reflect the recommended runtime service, such as ECS Fargate or Lambda.
+- Database should reflect the recommended managed database if a database service is present.
+- Storage, secrets, and monitoring should be included when present.
+- Return one row for every listed region.
+- Vary prices by region where appropriate.
+- Keep monitoring or secrets similar across regions only if they are effectively global or near-global in pricing.
+- Do not use INR.
+- Do not include markdown.
+
+Return strict JSON only in this shape:
+{{
+  "currency": "USD",
+  "line_items": [],
+  "assumptions": [],
+  "regional_prices": [
+    {{
+      "provider": "AWS",
+      "region": "us-east-1",
+      "currency": "USD",
+      "runtime_sku": "",
+      "runtime_monthly": 0,
+      "services_monthly": 0,
+      "total_monthly": 0,
+      "source": "Groq AWS estimate",
+      "service_breakdown": [
+        {{
+          "component": "Database",
+          "recommended": "Amazon RDS",
+          "currency": "USD",
+          "monthly_cost": 0,
+          "source": "Groq AWS estimate"
+        }}
+      ]
+    }}
+  ]
+}}
+"""
+
+    raw = _chat_completion(
+        [
+            {
+                "role": "system",
+                "content": (
+                    "You return strict JSON only. "
+                    "No markdown. No commentary."
+                ),
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        fallback="{}",
+        temperature=0.15,
+        max_tokens=4000,
+        response_format={"type": "json_object"},
+    )
+
+    try:
+        data = _load_json_object(raw)
+    except Exception as exc:
+        warnings.append(
+            f"AWS pricing LLM response could not be parsed: {exc}. "
+            f"Raw response preview: {_safe_preview(raw)}"
+        )
+        return None, warnings
+
+    regional_prices = data.get(
+        "regional_prices",
+        []
+    )
+
+    if not isinstance(regional_prices, list) or not regional_prices:
+        warnings.append(
+            "AWS pricing LLM response did not include regional prices."
+        )
+        return None, warnings
+
+    return data, warnings
+
+
 def _chat(messages: list[dict[str, str]], fallback: str, temperature: float) -> str:
     return _chat_completion(
         messages,
@@ -290,7 +444,7 @@ def _chat_completion(
         payload["response_format"] = response_format
 
     try:
-        with httpx.Client(timeout=30) as client:
+        with httpx.Client(timeout=90) as client:
             response = client.post(
                 GROQ_ENDPOINT,
                 headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
@@ -312,7 +466,6 @@ def _json_payload(content: str) -> str:
 
 
 def _load_json_object(content: str) -> dict[str, Any]:
-    print("LLM Content:",content)
     payload = _json_payload(content)
     try:
         data = json.loads(payload)
