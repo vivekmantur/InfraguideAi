@@ -186,12 +186,25 @@ class AzurePricingClient:
     async def get_regional_prices(
         self,
         vm_sku: str,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
-        vm_prices = await self.get_vm_prices_by_region(
-            vm_sku
-        )
+        if region:
+            vm_prices = [
+                await self.get_vm_price(
+                    region,
+                    vm_sku
+                )
+            ]
+
+        else:
+            vm_prices = (
+                await self.get_vm_prices_by_region(
+                vm_sku
+                )
+            )[:limit]
         semaphore = asyncio.Semaphore(8)
 
         async def build_row(

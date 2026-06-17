@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from .analyzer import analyze_local_repository, analyze_repository
 from .models import AssessmentRequest, BlueprintRequest, FolderAssessmentRequest, MigrationRequirements
 from .recommendation import build_assessment, render_blueprint
+from .services.mcp_client import CloudMcpClient
 
 app = FastAPI(title="InfraGuide AI API", version="0.1.0")
 
@@ -105,6 +106,27 @@ async def create_uploaded_assessment(
 @app.post("/assessments/blueprint", response_class=PlainTextResponse)
 def export_blueprint(request: BlueprintRequest):
     return render_blueprint(request.assessment)
+
+
+@app.post("/pricing/regions")
+async def regional_pricing(payload: dict):
+    provider = payload.get("provider")
+    cpu = int(payload.get("cpu", 2))
+    memory = int(payload.get("memory", 4))
+    limit = int(payload.get("limit", 10))
+    region = payload.get("region")
+    services = payload.get("services", [])
+    mcp_client = CloudMcpClient()
+
+    try:
+        if provider == "GCP":
+            return await mcp_client.get_gcp_regional_pricing(cpu, memory, services, limit, region)
+        if provider == "Azure":
+            return await mcp_client.get_azure_regional_pricing(cpu, memory, services, limit, region)
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Regional pricing failed: {exc}") from exc
+
+    raise HTTPException(status_code=400, detail="Regional pricing is available for Azure and GCP only.")
 
 
 def _safe_upload_path(filename: str) -> Path | None:

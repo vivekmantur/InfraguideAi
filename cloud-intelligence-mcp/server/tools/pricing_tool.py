@@ -146,7 +146,9 @@ def register_pricing_tools(mcp):
     async def get_azure_regional_pricing(
         cpu: int,
         memory: int,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
         try:
@@ -158,7 +160,9 @@ def register_pricing_tools(mcp):
 
             result = await azure_client.get_regional_prices(
                 vm_sku,
-                services
+                services,
+                limit,
+                region
             )
 
             print("Azure Regional Pricing Result:")
@@ -180,7 +184,9 @@ def register_pricing_tools(mcp):
     async def get_gcp_regional_pricing(
         cpu: int,
         memory: int,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
         try:
@@ -188,7 +194,9 @@ def register_pricing_tools(mcp):
             result = await gcp_client.get_regional_prices(
                 cpu,
                 memory,
-                services
+                services,
+                limit,
+                region
             )
 
             print("GCP Regional Pricing Result:")

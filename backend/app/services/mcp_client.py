@@ -79,11 +79,13 @@ class CloudMcpClient:
         self,
         cpu: int,
         memory: int,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
         async with httpx.AsyncClient(
-            timeout=180
+            timeout=240
         ) as client:
 
             response = await client.post(
@@ -91,7 +93,9 @@ class CloudMcpClient:
                 json={
                     "cpu": cpu,
                     "memory": memory,
-                    "services": services
+                    "services": services,
+                    "limit": limit,
+                    "region": region
                 }
             )
 
@@ -125,11 +129,13 @@ class CloudMcpClient:
         self,
         cpu: int,
         memory: int,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
         async with httpx.AsyncClient(
-            timeout=180
+            timeout=240
         ) as client:
 
             response = await client.post(
@@ -137,7 +143,9 @@ class CloudMcpClient:
                 json={
                     "cpu": cpu,
                     "memory": memory,
-                    "services": services
+                    "services": services,
+                    "limit": limit,
+                    "region": region
                 }
             )
 

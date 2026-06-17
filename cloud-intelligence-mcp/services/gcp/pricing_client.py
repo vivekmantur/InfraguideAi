@@ -20,7 +20,24 @@ class GcpPricingClient:
             "quantity": 730,
             "unit": "vCPU-hours/month",
             "required_terms": [
+                "Cloud SQL",
                 "CPU"
+            ],
+            "preferred_terms": [
+                "Zonal",
+                "vCPU"
+            ],
+            "excluded_terms": [
+                "Network",
+                "Extended support",
+                "Read Replica",
+                "FDC Trial",
+                "Enterprise Plus",
+                "Performance Optimized",
+                "Enterprise N4",
+                "+",
+                "Storage",
+                "RAM"
             ],
             "fallback_monthly": 95,
         },
@@ -30,10 +47,21 @@ class GcpPricingClient:
             "quantity": 50,
             "unit": "GB-month",
             "required_terms": [
+                "Standard",
                 "Storage"
             ],
             "preferred_terms": [
-                "Standard"
+                "Regional"
+            ],
+            "excluded_terms": [
+                "Autoclass",
+                "Dual-region",
+                "Multi-region",
+                "Operation",
+                "Early Delete",
+                "Archive",
+                "Coldline",
+                "Nearline"
             ],
             "fallback_monthly": 2,
         },
@@ -53,10 +81,14 @@ class GcpPricingClient:
             "quantity": 5,
             "unit": "GB ingested/month",
             "required_terms": [
-                "Monitoring"
+                "Ingested"
             ],
             "preferred_terms": [
-                "Data"
+                "Metrics"
+            ],
+            "excluded_terms": [
+                "API Requests",
+                "Uptime Checks"
             ],
             "fallback_monthly": 15,
         },
@@ -88,8 +120,16 @@ class GcpPricingClient:
         api_key: str
     ):
         self.api_key = api_key
+        self._compute_service_id: str | None = None
+        self._service_id_cache: dict[str, str] = {}
+        self._service_skus_cache: dict[str, list[dict]] = {}
+        self._sku_price_cache: dict[str, dict] = {}
 
     async def get_compute_service_id(self):
+
+        if self._compute_service_id:
+
+            return self._compute_service_id
 
         url = (
             f"{self.BASE_URL}/services"
@@ -151,8 +191,10 @@ class GcpPricingClient:
                         print(service)
 
                         return (
-                            service["name"]
-                            .split("/")[-1]
+                            self._set_compute_service_id(
+                                service["name"]
+                                .split("/")[-1]
+                            )
                         )
 
                 page_token = data.get(
@@ -166,10 +208,22 @@ class GcpPricingClient:
             "Compute Engine service not found"
         )
 
+    def _set_compute_service_id(
+        self,
+        service_id: str
+    ) -> str:
+
+        self._compute_service_id = service_id
+        return service_id
+
     async def get_sku_price(
         self,
         sku_id: str
     ) -> dict:
+
+        if sku_id in self._sku_price_cache:
+
+            return self._sku_price_cache[sku_id]
 
         url = (
             f"{self.BASE_URL}/skus/"
@@ -202,20 +256,78 @@ class GcpPricingClient:
                     f"for SKU {sku_id}"
                 )
 
-            default_price = next(
-                (
-                    p for p in sku_prices
-                    if p.get(
+            default_prices = [
+                p for p in sku_prices
+                if (
+                    p.get(
                         "consumptionModelDescription"
                     ) == "Default"
-                ),
-                sku_prices[0]
-            )
+                    or not p.get(
+                        "consumptionModelDescription"
+                    )
+                )
+            ] or sku_prices
 
-            tier = (
-                default_price["rate"]
-                ["tiers"][0]
-            )
+            tier = None
+            first_tier = None
+
+            for sku_price in default_prices:
+
+                tiers = (
+                    sku_price
+                    .get(
+                        "rate",
+                        {}
+                    )
+                    .get(
+                        "tiers",
+                        []
+                    )
+                )
+
+                if not tiers:
+                    continue
+
+                if first_tier is None:
+                    first_tier = tiers[0]
+
+                for candidate_tier in tiers:
+
+                    list_price = (
+                        candidate_tier.get(
+                            "listPrice",
+                            {}
+                        )
+                    )
+                    units = float(
+                        list_price.get(
+                            "units",
+                            0
+                        )
+                    )
+                    nanos = float(
+                        list_price.get(
+                            "nanos",
+                            0
+                        )
+                    )
+
+                    if units or nanos:
+                        tier = candidate_tier
+                        break
+
+                if tier is not None:
+                    break
+
+            if tier is None and first_tier is not None:
+                tier = first_tier
+
+            if tier is None:
+
+                raise ValueError(
+                    f"No rate tiers found "
+                    f"for SKU {sku_id}"
+                )
 
             list_price = (
                 tier["listPrice"]
@@ -242,7 +354,7 @@ class GcpPricingClient:
                 units + nanos
             )
 
-            return {
+            result = {
                 "sku_id": sku_id,
                 "currency": data.get(
                     "currencyCode",
@@ -252,123 +364,45 @@ class GcpPricingClient:
                     hourly_cost
             }
 
+            self._sku_price_cache[sku_id] = result
+            return result
+
     async def find_compute_skus(
         self,
         machine_family: str
     ):
 
-        service_id = (
-            await self
-            .get_compute_service_id()
-        )
-
-        url = (
-            f"{self.BASE_URL}/skus"
-        )
-
+        service_id = await self.get_compute_service_id()
+        skus = await self._load_service_skus(service_id)
         core_sku = None
         ram_sku = None
 
-        page_token = None
+        for sku in skus:
 
-        async with httpx.AsyncClient(
-            timeout=60
-        ) as client:
+            kind = self._compute_sku_kind(
+                sku,
+                machine_family
+            )
 
-            while True:
+            if kind is None:
 
-                params = {
-                    "filter":
-                        f'service="services/{service_id}"',
-                    "key": self.api_key,
-                    "pageSize": 5000
-                }
+                continue
 
-                if page_token:
-                    params["pageToken"] = (
-                        page_token
-                    )
+            if not self._sku_matches_region(
+                sku,
+                "us-central1"
+            ):
 
-                response = await client.get(
-                    url,
-                    params=params
-                )
+                continue
 
-                response.raise_for_status()
+            if kind == "core_sku" and core_sku is None:
+                core_sku = sku["skuId"]
 
-                data = response.json()
+            if kind == "ram_sku" and ram_sku is None:
+                ram_sku = sku["skuId"]
 
-                skus = data.get(
-                    "skus",
-                    []
-                )
-
-                print(
-                    f"Loaded "
-                    f"{len(skus)} SKUs"
-                )
-
-                for sku in skus:
-
-                    display_name = (
-                        sku.get(
-                            "displayName",
-                            ""
-                        )
-                        .upper()
-                    )
-
-                    if (
-                        machine_family.upper()
-                        in display_name
-                    ):
-
-                        if (
-                            "CORE"
-                            in display_name
-                            and core_sku is None
-                        ):
-                            core_sku = (
-                                sku["skuId"]
-                            )
-
-                            print(
-                                f"Found CORE SKU: "
-                                f"{core_sku}"
-                            )
-
-                        if (
-                            "RAM"
-                            in display_name
-                            and ram_sku is None
-                        ):
-                            ram_sku = (
-                                sku["skuId"]
-                            )
-
-                            print(
-                                f"Found RAM SKU: "
-                                f"{ram_sku}"
-                            )
-
-                    if (
-                        core_sku
-                        and ram_sku
-                    ):
-                        break
-
-                if (
-                    core_sku
-                    and ram_sku
-                ):
-                    break
-
-                page_token = data.get(
-                    "nextPageToken"
-                )
-
-                if not page_token:
-                    break
+            if core_sku and ram_sku:
+                break
 
         if not core_sku:
             raise ValueError(
@@ -493,12 +527,16 @@ class GcpPricingClient:
         self,
         cpu: int,
         memory: int,
-        services: list[dict]
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
     ) -> dict:
 
         compute_prices = await self.get_compute_prices_by_region(
             cpu,
-            memory
+            memory,
+            limit,
+            region
         )
         semaphore = asyncio.Semaphore(8)
 
@@ -603,7 +641,9 @@ class GcpPricingClient:
     async def get_compute_prices_by_region(
         self,
         cpu: int,
-        memory: int
+        memory: int,
+        limit: int | None = None,
+        region: str | None = None
     ) -> list[dict]:
 
         machine = select_machine_type(
@@ -641,29 +681,36 @@ class GcpPricingClient:
                     {}
                 )[kind] = sku["skuId"]
 
-        rows = []
+        semaphore = asyncio.Semaphore(12)
 
-        for region, regional_skus in by_region.items():
+        async def build_compute_row(
+            region: str,
+            regional_skus: dict
+        ) -> dict | None:
 
             if (
                 "core_sku" not in regional_skus
                 or "ram_sku" not in regional_skus
             ):
 
-                continue
+                return None
 
             try:
 
-                core_price = await self.get_sku_price(
-                    regional_skus["core_sku"]
-                )
-                ram_price = await self.get_sku_price(
-                    regional_skus["ram_sku"]
-                )
+                async with semaphore:
+
+                    core_price, ram_price = await asyncio.gather(
+                        self.get_sku_price(
+                            regional_skus["core_sku"]
+                        ),
+                        self.get_sku_price(
+                            regional_skus["ram_sku"]
+                        )
+                    )
 
             except Exception:
 
-                continue
+                return None
 
             hourly_cost = (
                 core_price["hourly_cost"]
@@ -673,34 +720,76 @@ class GcpPricingClient:
                 * memory
             )
 
-            rows.append(
-                {
-                    "region": region,
-                    "currency": core_price.get(
-                        "currency",
-                        "USD"
-                    ),
-                    "machine_type": machine[
-                        "machine_type"
-                    ],
-                    "hourly_cost": round(
-                        hourly_cost,
-                        6
-                    ),
-                    "monthly_cost": round(
-                        hourly_cost
-                        * 24
-                        * 30,
-                        2
-                    ),
-                    "core_sku": regional_skus[
-                        "core_sku"
-                    ],
-                    "ram_sku": regional_skus[
-                        "ram_sku"
-                    ],
-                }
+            return {
+                "region": region,
+                "currency": core_price.get(
+                    "currency",
+                    "USD"
+                ),
+                "machine_type": machine[
+                    "machine_type"
+                ],
+                "hourly_cost": round(
+                    hourly_cost,
+                    6
+                ),
+                "monthly_cost": round(
+                    hourly_cost
+                    * 24
+                    * 30,
+                    2
+                ),
+                "core_sku": regional_skus[
+                    "core_sku"
+                ],
+                "ram_sku": regional_skus[
+                    "ram_sku"
+                ],
+            }
+
+        selected_regions = sorted(
+            by_region.items(),
+            key=lambda item: (
+                self.COMMON_REGIONS.index(item[0])
+                if item[0] in self.COMMON_REGIONS
+                else len(self.COMMON_REGIONS),
+                item[0]
             )
+        )
+
+        if region:
+
+            selected_regions = [
+                item
+                for item in selected_regions
+                if item[0] == region
+            ]
+
+            if not selected_regions:
+
+                raise ValueError(
+                    f"No regional GCP compute pricing found "
+                    f"for {region}"
+                )
+
+        if limit:
+
+            selected_regions = selected_regions[:limit]
+
+        computed_rows = await asyncio.gather(
+            *[
+                build_compute_row(
+                    region,
+                    regional_skus
+                )
+                for region, regional_skus in selected_regions
+            ]
+        )
+        rows = [
+            row
+            for row in computed_rows
+            if row is not None
+        ]
 
         if not rows:
 
@@ -735,7 +824,7 @@ class GcpPricingClient:
                         "ram_sku"
                     ),
                 }
-                for region in self.COMMON_REGIONS
+                for region in self.COMMON_REGIONS[:limit or len(self.COMMON_REGIONS)]
             ]
 
         print(
@@ -932,6 +1021,16 @@ class GcpPricingClient:
                     []
                 )
             )
+            and not any(
+                self._sku_contains(
+                    sku,
+                    term
+                )
+                for term in rule.get(
+                    "excluded_terms",
+                    []
+                )
+            )
         ]
 
         if not candidates:
@@ -956,16 +1055,32 @@ class GcpPricingClient:
             )
         ]
 
-        return (
-            preferred[0]
+        ranked = sorted(
+            preferred
             if preferred
-            else candidates[0]
+            else candidates,
+            key=lambda sku: self._service_sku_rank(
+                sku,
+                region
+            )
+        )
+
+        return (
+            ranked[0]
         )
 
     async def _find_service_id(
         self,
         display_name: str
     ) -> str:
+
+        cache_key = display_name.upper()
+
+        if cache_key in self._service_id_cache:
+
+            return self._service_id_cache[cache_key]
+
+        partial_match = None
 
         async for service in self._iter_services():
 
@@ -974,15 +1089,30 @@ class GcpPricingClient:
                 ""
             )
 
-            if (
-                display_name.upper()
-                in service_display_name.upper()
-            ):
+            if display_name.upper() == service_display_name.upper():
 
-                return (
+                service_id = (
                     service["name"]
                     .split("/")[-1]
                 )
+                self._service_id_cache[cache_key] = service_id
+                return service_id
+
+            if (
+                partial_match is None
+                and display_name.upper()
+                in service_display_name.upper()
+            ):
+
+                partial_match = (
+                    service["name"]
+                    .split("/")[-1]
+                )
+
+        if partial_match:
+
+            self._service_id_cache[cache_key] = partial_match
+            return partial_match
 
         raise ValueError(
             f"{display_name} service not found"
@@ -1037,6 +1167,10 @@ class GcpPricingClient:
         service_id: str
     ) -> list[dict]:
 
+        if service_id in self._service_skus_cache:
+
+            return self._service_skus_cache[service_id]
+
         url = (
             f"{self.BASE_URL}/skus"
         )
@@ -1080,6 +1214,7 @@ class GcpPricingClient:
                 if not page_token:
                     break
 
+        self._service_skus_cache[service_id] = skus
         return skus
 
     def _sku_matches_region(
@@ -1282,3 +1417,45 @@ class GcpPricingClient:
         )
 
         return term.lower() in haystack.lower()
+
+    def _service_sku_rank(
+        self,
+        sku: dict,
+        region: str
+    ) -> tuple[int, str]:
+
+        regions = self._sku_regions(
+            sku
+        )
+        display_name = sku.get(
+            "displayName",
+            ""
+        )
+        lower_name = display_name.lower()
+
+        rank = 0
+
+        if regions == [
+            region
+        ]:
+            rank -= 30
+
+        if region in regions:
+            rank -= 10
+
+        if "global" in regions:
+            rank += 20
+
+        if "regional" in lower_name:
+            rank -= 5
+
+        if "multi-region" in lower_name:
+            rank += 8
+
+        if "dual-region" in lower_name:
+            rank += 8
+
+        return (
+            rank,
+            display_name
+        )

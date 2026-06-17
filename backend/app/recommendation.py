@@ -472,41 +472,6 @@ async def _cost_estimate(
                         )
                         print(service_pricing)
 
-                try:
-
-                    regional_pricing = await mcp_client.get_gcp_regional_pricing(
-                        cpu=cpu,
-                        memory=memory,
-                        services=[
-                            service.model_dump()
-                            for service in billable_services
-                        ]
-                    )
-
-                    if (
-                        isinstance(regional_pricing, dict)
-                        and "error" not in regional_pricing
-                    ):
-
-                        regional_prices = regional_pricing.get(
-                            "regions",
-                            []
-                        )
-
-                    elif regional_pricing:
-
-                        print(
-                            "GCP regional pricing returned error:"
-                        )
-                        print(regional_pricing)
-
-                except Exception as ex:
-
-                    print(
-                        "GCP regional pricing failed:"
-                    )
-                    print(ex)
-
                 total_monthly = monthly + additional_monthly
 
                 lower = int(total_monthly * 0.9)
@@ -670,41 +635,6 @@ async def _cost_estimate(
                             "Azure service pricing returned error:"
                         )
                         print(service_pricing)
-
-                try:
-
-                    regional_pricing = await mcp_client.get_azure_regional_pricing(
-                        cpu=cpu,
-                        memory=memory,
-                        services=[
-                            service.model_dump()
-                            for service in billable_services
-                        ]
-                    )
-
-                    if (
-                        isinstance(regional_pricing, dict)
-                        and "error" not in regional_pricing
-                    ):
-
-                        regional_prices = regional_pricing.get(
-                            "regions",
-                            []
-                        )
-
-                    elif regional_pricing:
-
-                        print(
-                            "Azure regional pricing returned error:"
-                        )
-                        print(regional_pricing)
-
-                except Exception as ex:
-
-                    print(
-                        "Azure regional pricing failed:"
-                    )
-                    print(ex)
 
                 total_monthly = monthly + additional_monthly
 

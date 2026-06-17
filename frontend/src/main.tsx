@@ -78,6 +78,10 @@ type Assessment = {
     assumptions?: string[];
     regional_prices?: RegionalPrice[];
   };
+  cloud_sizing?: {
+    cpu_cores?: number;
+    memory_gb?: number;
+  } | null;
   governance_assessment?: {
     risk_level: string;
     issues?: string[];
@@ -98,6 +102,53 @@ const options = {
   expected_traffic: ["Low", "Medium", "High"],
   budget_preference: ["Balanced", "Low Cost", "Performance Focused"],
   migration_timeline: ["3 Months", "Immediate", "6 Months", "Flexible"],
+};
+
+const pricingRegions: Record<string, string[]> = {
+  Azure: [
+    "eastus",
+    "eastus2",
+    "centralus",
+    "westus",
+    "westus2",
+    "westus3",
+    "southcentralus",
+    "northeurope",
+    "westeurope",
+    "uksouth",
+    "germanywestcentral",
+    "francecentral",
+    "switzerlandnorth",
+    "canadacentral",
+    "brazilsouth",
+    "centralindia",
+    "southindia",
+    "southeastasia",
+    "eastasia",
+    "japaneast",
+    "koreacentral",
+    "australiaeast",
+  ],
+  GCP: [
+    "us-central1",
+    "us-east1",
+    "us-east4",
+    "us-west1",
+    "us-west2",
+    "northamerica-northeast1",
+    "southamerica-east1",
+    "europe-west1",
+    "europe-west2",
+    "europe-west3",
+    "europe-west4",
+    "europe-north1",
+    "asia-south1",
+    "asia-east1",
+    "asia-east2",
+    "asia-northeast1",
+    "asia-southeast1",
+    "australia-southeast1",
+  ],
 };
 
 function App() {
@@ -442,6 +493,7 @@ function Select({ label, value, values, onChange }: { label: string; value: stri
 
 function Report({ assessment, onDownload }: { assessment: Assessment; onDownload: () => void }) {
   const [isPricingModalOpen, setIsPricingModalOpen] = React.useState(false);
+  const [appliedRegionalPrice, setAppliedRegionalPrice] = React.useState<RegionalPrice | null>(null);
   const governance = assessment.governance_assessment ?? {
     risk_level: "Not assessed",
     issues: [],
@@ -449,6 +501,23 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
     recommendations: [],
     recommendation: "Security and governance assessment was not returned by the API.",
   };
+  const activeMonthlyValue = appliedRegionalPrice
+    ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly)
+    : `INR ${assessment.cost_estimation.monthly.toLocaleString("en-IN")}`;
+  const activeAnnualValue = appliedRegionalPrice
+    ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly * 12)
+    : `INR ${assessment.cost_estimation.annual.toLocaleString("en-IN")}`;
+  const activeRangeValue = appliedRegionalPrice
+    ? `${appliedRegionalPrice.region} selected`
+    : assessment.cost_estimation.monthly_range ?? "Not estimated";
+  const activeLineItems = appliedRegionalPrice
+    ? [
+        `${appliedRegionalPrice.runtime_sku || "Runtime"} in ${appliedRegionalPrice.region}: ${formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.runtime_monthly)}/month`,
+        ...((appliedRegionalPrice.service_breakdown ?? []).map((service) => (
+          `${service.component}: ${service.recommended ?? "Managed service"}: ${formatMoney(service.currency ?? appliedRegionalPrice.currency, service.monthly_cost)}/month`
+        ))),
+      ]
+    : assessment.cost_estimation.line_items;
 
   return (
     <div>
@@ -514,11 +583,12 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
         >
           <KeyValue label="Provider" value={assessment.recommended_provider} />
           <KeyValue label="Strategy" value={assessment.migration_strategy} />
-          <KeyValue label="Monthly" value={`INR ${assessment.cost_estimation.monthly.toLocaleString("en-IN")}`} />
-          <KeyValue label="Range" value={assessment.cost_estimation.monthly_range ?? "Not estimated"} />
-          <KeyValue label="Annual" value={`INR ${assessment.cost_estimation.annual.toLocaleString("en-IN")}`} />
+          <KeyValue label="Location" value={appliedRegionalPrice?.region ?? "Default estimate"} />
+          <KeyValue label="Monthly" value={activeMonthlyValue} />
+          <KeyValue label="Range" value={activeRangeValue} />
+          <KeyValue label="Annual" value={activeAnnualValue} />
           <div className="mt-4">
-            <List items={assessment.cost_estimation.line_items} />
+            <List items={activeLineItems} />
           </div>
         </Panel>
       </div>
@@ -549,7 +619,14 @@ function Report({ assessment, onDownload }: { assessment: Assessment; onDownload
       {isPricingModalOpen && (
         <RegionalPricingModal
           provider={assessment.recommended_provider}
-          prices={assessment.cost_estimation.regional_prices ?? []}
+          initialPrices={assessment.cost_estimation.regional_prices ?? []}
+          cloudSizing={assessment.cloud_sizing}
+          services={assessment.recommended_services}
+          appliedRegion={appliedRegionalPrice}
+          onApply={(price) => {
+            setAppliedRegionalPrice(price);
+            setIsPricingModalOpen(false);
+          }}
           onClose={() => setIsPricingModalOpen(false)}
         />
       )}
@@ -577,23 +654,134 @@ function BlueprintPreview({ assessment, className = "" }: { assessment: Assessme
   );
 }
 
-function RegionalPricingModal({ provider, prices, onClose }: { provider: string; prices: RegionalPrice[]; onClose: () => void }) {
-  const [selectedRegion, setSelectedRegion] = React.useState<RegionalPrice | null>(prices[0] ?? null);
+function RegionalPricingModal({
+  provider,
+  initialPrices,
+  cloudSizing,
+  services,
+  appliedRegion,
+  onApply,
+  onClose,
+}: {
+  provider: string;
+  initialPrices: RegionalPrice[];
+  cloudSizing?: { cpu_cores?: number; memory_gb?: number } | null;
+  services: ServiceRecommendation[];
+  appliedRegion: RegionalPrice | null;
+  onApply: (price: RegionalPrice) => void;
+  onClose: () => void;
+}) {
+  const [prices, setPrices] = React.useState<RegionalPrice[]>(initialPrices);
+  const [selectedRegion, setSelectedRegion] = React.useState<RegionalPrice | null>(appliedRegion ?? initialPrices[0] ?? null);
+  const [isLoadingRegions, setIsLoadingRegions] = React.useState(initialPrices.length === 0 && ["Azure", "GCP"].includes(provider));
+  const [regionalError, setRegionalError] = React.useState("");
+  const [selectedPricingRegion, setSelectedPricingRegion] = React.useState("");
+  const [hasLoadedRegionList, setHasLoadedRegionList] = React.useState(initialPrices.length > 0);
+  const availableRegions = pricingRegions[provider] ?? [];
+
+  React.useEffect(() => {
+    if (!["Azure", "GCP"].includes(provider)) {
+      return;
+    }
+
+    let isActive = true;
+
+    async function loadRegionalPricing() {
+      setIsLoadingRegions(true);
+      setRegionalError("");
+
+      try {
+        const response = await fetch(`${API_BASE_URL}/pricing/regions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            provider,
+            cpu: cloudSizing?.cpu_cores ?? 2,
+            memory: cloudSizing?.memory_gb ?? 4,
+            limit: selectedPricingRegion ? 1 : 10,
+            region: selectedPricingRegion || undefined,
+            services: services
+              .filter((service) => service.component !== "Application Runtime")
+              .map((service) => ({
+                component: service.component,
+                recommended: service.recommended,
+                current: service.current,
+              })),
+          }),
+        });
+
+        if (!response.ok) {
+          throw new Error(await responseErrorMessage(response));
+        }
+
+        const data = await response.json();
+        const rows = data.regions ?? [];
+
+        if (isActive) {
+          setPrices(rows);
+          setSelectedRegion((current) => rows.find((row: RegionalPrice) => row.region === current?.region) ?? rows[0] ?? null);
+          if (!selectedPricingRegion && rows.length > 0) {
+            setHasLoadedRegionList(true);
+          }
+        }
+      } catch (caught) {
+        if (isActive) {
+          setRegionalError(caught instanceof Error ? caught.message : "Regional pricing failed");
+        }
+      } finally {
+        if (isActive) {
+          setIsLoadingRegions(false);
+        }
+      }
+    }
+
+    loadRegionalPricing();
+
+    return () => {
+      isActive = false;
+    };
+  }, [cloudSizing?.cpu_cores, cloudSizing?.memory_gb, provider, selectedPricingRegion, services]);
 
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="modal-panel regional-pricing-modal" role="dialog" aria-modal="true" aria-labelledby="regionalPricingTitle">
         <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
+          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
             <h2 id="regionalPricingTitle" className="text-xl font-semibold">{provider} regional pricing</h2>
             <p className="mt-1 text-sm text-ink/65">Monthly estimate by region for runtime and recommended services.</p>
+            </div>
+            {availableRegions.length > 0 && (
+              <label className="w-full sm:w-64">
+                <span className="field-label">Location</span>
+                <select
+                  className="input"
+                  value={selectedPricingRegion}
+                  onChange={(event) => setSelectedPricingRegion(event.target.value)}
+                  disabled={!hasLoadedRegionList || isLoadingRegions}
+                >
+                  <option value="">Top 10 regions</option>
+                  {availableRegions.map((region) => (
+                    <option key={region} value={region}>{region}</option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <button type="button" className="clear-folder-button" onClick={onClose} aria-label="Close regional pricing dialog">
             <X size={16} />
           </button>
         </div>
 
-        {prices.length > 0 ? (
+        {isLoadingRegions ? (
+          <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
+            Loading regional pricing from {provider}. This can take a little longer for GCP because Google Billing pricing is paged by service and SKU.
+          </div>
+        ) : regionalError ? (
+          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">
+            {regionalError}
+          </div>
+        ) : prices.length > 0 ? (
           <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
             <div className="overflow-x-hidden overflow-y-auto rounded-md border border-ink/10">
               <table className="w-full table-fixed border-collapse text-left text-sm">
@@ -630,7 +818,11 @@ function RegionalPricingModal({ provider, prices, onClose }: { provider: string;
               </table>
             </div>
 
-            <RegionServiceBreakdown price={selectedRegion} />
+            <RegionServiceBreakdown
+              price={selectedRegion}
+              appliedRegion={appliedRegion}
+              onApply={onApply}
+            />
           </div>
         ) : (
           <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
@@ -642,7 +834,15 @@ function RegionalPricingModal({ provider, prices, onClose }: { provider: string;
   );
 }
 
-function RegionServiceBreakdown({ price }: { price: RegionalPrice | null }) {
+function RegionServiceBreakdown({
+  price,
+  appliedRegion,
+  onApply,
+}: {
+  price: RegionalPrice | null;
+  appliedRegion: RegionalPrice | null;
+  onApply: (price: RegionalPrice) => void;
+}) {
   if (!price) {
     return (
       <aside className="rounded-md border border-ink/10 bg-cloud p-4 text-sm text-ink/65">
@@ -661,6 +861,18 @@ function RegionServiceBreakdown({ price }: { price: RegionalPrice | null }) {
       <KeyValue label="Runtime" value={formatMoney(price.currency, price.runtime_monthly)} />
       <KeyValue label="Services Total" value={formatMoney(price.currency, price.services_monthly)} />
       <KeyValue label="Total" value={formatMoney(price.currency, price.total_monthly)} />
+      <div className="mt-4">
+        <button
+          type="button"
+          className="flex w-full items-center justify-center rounded-md bg-moss px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60"
+          onClick={() => onApply(price)}
+          disabled={appliedRegion?.region === price.region && appliedRegion.total_monthly === price.total_monthly}
+        >
+          {appliedRegion?.region === price.region && appliedRegion.total_monthly === price.total_monthly
+            ? "Migration location updated"
+            : "Update location to migration"}
+        </button>
+      </div>
 
       <div className="mt-4 space-y-3">
         {(price.service_breakdown ?? []).length > 0 ? (

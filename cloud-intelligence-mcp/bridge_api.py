@@ -192,6 +192,13 @@ async def get_gcp_regional_pricing(
         "services",
         []
     )
+    region = payload.get(
+        "region"
+    )
+    limit = payload.get(
+        "limit",
+        10
+    )
 
     async with streamablehttp_client(
         "http://127.0.0.1:8000/mcp"
@@ -213,7 +220,9 @@ async def get_gcp_regional_pricing(
                 arguments={
                     "cpu": cpu,
                     "memory": memory,
-                    "services": services
+                    "services": services,
+                    "limit": limit,
+                    "region": region
                 }
             )
 
@@ -376,6 +385,13 @@ async def get_azure_regional_pricing(
         "services",
         []
     )
+    region = payload.get(
+        "region"
+    )
+    limit = payload.get(
+        "limit",
+        10
+    )
 
     async with streamablehttp_client(
         "http://127.0.0.1:8000/mcp"
@@ -397,7 +413,9 @@ async def get_azure_regional_pricing(
                 arguments={
                     "cpu": cpu,
                     "memory": memory,
-                    "services": services
+                    "services": services,
+                    "limit": limit,
+                    "region": region
                 }
             )
 

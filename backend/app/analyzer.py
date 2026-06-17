@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Iterable
 from urllib.parse import quote, urlsplit, urlunsplit
 import subprocess
+import httpx
 
 from .ai import analyze_repository_evidence
 from .models import MigrationRequirements, RepositoryAnalysis
@@ -50,8 +51,6 @@ NON_EVIDENCE_FILE_NAMES = {
 if WINDOWS_GIT.exists() and "GIT_PYTHON_GIT_EXECUTABLE" not in os.environ:
     os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = str(WINDOWS_GIT)
 
-from git import Repo
-
 
 def analyze_repository(repository_url: str, migration_requirements,github_token: str | None = None) -> tuple[RepositoryAnalysis, list[str]]:
     warnings: list[str] = []
@@ -60,7 +59,22 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
     print("Token supplied:", bool(github_token))
 
     try:
-        Repo.clone_from(_authenticated_github_url(repository_url, github_token), tmp_dir, depth=1)
+        if (
+            not (github_token or "").strip()
+            and _github_repository_needs_token(repository_url)
+        ):
+            warnings.append(
+                "Repository clone failed: private repository or repository not accessible without a GitHub access token."
+            )
+            return _empty_analysis(), warnings
+
+        _clone_repository(
+            _authenticated_github_url(
+                repository_url,
+                github_token
+            ),
+            tmp_dir
+        )
         print("CLONE SUCCESSFUL")
         print("Repository cloned to:", tmp_dir)
         files = list(_iter_repo_files(tmp_dir))
@@ -91,6 +105,92 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
         return _empty_analysis(), warnings
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
+def _non_interactive_git_env() -> dict[str, str]:
+    env = os.environ.copy()
+    env.update(
+        {
+            "GIT_TERMINAL_PROMPT": "0",
+            "GCM_INTERACTIVE": "Never",
+            "GIT_ASKPASS": "",
+            "SSH_ASKPASS": "",
+        }
+    )
+    return env
+
+
+def _clone_repository(
+    repository_url: str,
+    destination: Path
+) -> None:
+    git_executable = (
+        str(WINDOWS_GIT)
+        if WINDOWS_GIT.exists()
+        else "git"
+    )
+    result = subprocess.run(
+        [
+            git_executable,
+            "-c",
+            "credential.helper=",
+            "-c",
+            "core.askPass=",
+            "clone",
+            "--depth",
+            "1",
+            repository_url,
+            str(destination)
+        ],
+        capture_output=True,
+        text=True,
+        env=_non_interactive_git_env(),
+        timeout=60
+    )
+
+    if result.returncode != 0:
+        message = (
+            result.stderr.strip()
+            or result.stdout.strip()
+            or "git clone failed"
+        )
+        raise RuntimeError(message)
+
+
+def _github_repository_needs_token(repository_url: str) -> bool:
+    split = urlsplit(repository_url)
+
+    if split.scheme not in {"http", "https"} or split.hostname != "github.com":
+        return False
+
+    parts = [
+        part for part in split.path.strip("/").split("/")
+        if part
+    ]
+
+    if len(parts) < 2:
+        return False
+
+    owner = parts[0]
+    repo = parts[1].removesuffix(".git")
+
+    try:
+        response = httpx.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            timeout=8,
+            headers={
+                "Accept": "application/vnd.github+json"
+            }
+        )
+
+    except Exception:
+        return False
+
+    return response.status_code in {
+        401,
+        403,
+        404
+    }
 
 
 def _authenticated_github_url(repository_url: str, github_token: str | None) -> str:
