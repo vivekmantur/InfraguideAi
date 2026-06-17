@@ -36,6 +36,11 @@ IGNORED_PARTS = {
     "venv",
     "env",
     "__pycache__",
+     ".vs",
+    ".nuget",
+    "packages",
+    "artifacts",
+    "TestResults",
 }
 IGNORED_FILE_NAMES = {
     "tsconfig.tsbuildinfo",
@@ -54,7 +59,15 @@ if WINDOWS_GIT.exists() and "GIT_PYTHON_GIT_EXECUTABLE" not in os.environ:
 
 def analyze_repository(repository_url: str, migration_requirements,github_token: str | None = None) -> tuple[RepositoryAnalysis, list[str]]:
     warnings: list[str] = []
-    tmp_dir = Path(tempfile.mkdtemp(prefix="infraguide-"))
+    temp_root = Path("D:/InfraGuideTemp")
+    temp_root.mkdir(parents=True, exist_ok=True)
+    tmp_dir = Path(
+    tempfile.mkdtemp(
+        prefix="infraguide-",
+        dir="D:/InfraGuideTemp"
+    )
+)
+    
     print("Repository URL:", repository_url)
     print("Token supplied:", bool(github_token))
 
@@ -139,13 +152,15 @@ def _clone_repository(
             "clone",
             "--depth",
             "1",
+            "--single-branch",
+            "--filter=blob:none",
             repository_url,
             str(destination)
         ],
         capture_output=True,
         text=True,
         env=_non_interactive_git_env(),
-        timeout=60
+        timeout=300
     )
 
     if result.returncode != 0:

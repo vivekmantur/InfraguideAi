@@ -194,6 +194,7 @@ function App() {
   const [isTokenModalOpen, setIsTokenModalOpen] = React.useState(false);
   const [error, setError] = React.useState("");
   const requirements = sourceMode === "github" ? githubRequirements : folderRequirements;
+  const [isRepositoryLocked, setIsRepositoryLocked] = React.useState(false);
 
   async function submitAssessment(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -226,6 +227,9 @@ function App() {
       }
 
       setAssessment(nextAssessment);
+      if (sourceMode === "github") {
+        setIsRepositoryLocked(true);
+      }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Assessment failed");
     } finally {
@@ -410,20 +414,60 @@ function App() {
 
           {sourceMode === "github" ? (
             <>
-              <RequiredLabel htmlFor="repositoryUrl">GitHub Repository</RequiredLabel>
+            <RequiredLabel htmlFor="repositoryUrl">
+              GitHub Repository
+            </RequiredLabel>
+
+            <div className="relative">
               <input
                 id="repositoryUrl"
-                className={`input ${fieldErrors.repositoryUrl ? "input-error" : ""}`}
+                className={`input pr-14 ${
+                  isRepositoryLocked ? "bg-gray-100 cursor-not-allowed" : ""
+                } ${fieldErrors.repositoryUrl ? "input-error" : ""}`}
                 value={repositoryUrl}
+                readOnly={isRepositoryLocked}
                 onChange={(event) => {
+                  if (isRepositoryLocked) return;
+
                   setRepositoryUrl(event.target.value);
-                  setFieldErrors((current) => ({ ...current, repositoryUrl: event.target.value.trim() ? "" : requiredFieldMessage }));
+                  setFieldErrors((current) => ({
+                    ...current,
+                    repositoryUrl: event.target.value.trim()
+                      ? ""
+                      : requiredFieldMessage,
+                  }));
                 }}
                 placeholder="https://github.com/company/ecommerce-app"
               />
-              {fieldErrors.repositoryUrl && <FieldError message={fieldErrors.repositoryUrl} />}
-            </>
-          ) : (
+
+              {repositoryUrl.trim() && (
+               <button
+  type="button"
+  className="absolute right-4 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center"
+  onClick={() => {
+    setRepositoryUrl("");
+    setIsRepositoryLocked(false);
+    setAssessment(null);
+    setGithubToken("");
+    setError("");
+
+    setFieldErrors((current) => ({
+      ...current,
+      repositoryUrl: "",
+    }));
+  }}
+  title="Clear Repository"
+>
+  <X size={18} />
+</button>
+              )}
+            </div>
+
+            {fieldErrors.repositoryUrl && (
+              <FieldError message={fieldErrors.repositoryUrl} />
+            )}
+          </>
+            ) : (
             <label>
               <RequiredLabel>Project Folder</RequiredLabel>
               <input
