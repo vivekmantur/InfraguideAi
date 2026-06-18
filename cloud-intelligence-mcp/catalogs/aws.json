@@ -1,0 +1,56 @@
+{
+  "provider": "AWS",
+  "source": "local_catalog",
+  "version": "2026-06-18",
+  "regions": [
+    "us-east-1",
+    "us-east-2",
+    "us-west-1",
+    "us-west-2",
+    "ca-central-1",
+    "sa-east-1",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-central-1",
+    "eu-north-1",
+    "ap-south-1",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-northeast-1"
+  ],
+  "service_aliases": {
+    "amazon ecs fargate": "compute",
+    "aws lambda": "functions",
+    "amazon rds": "database",
+    "amazon s3": "storage",
+    "aws secrets manager": "secrets",
+    "amazon cloudwatch": "monitoring",
+    "amazon elasticache": "cache"
+  },
+  "service_limits": {
+    "compute": [
+      "ECS Fargate task CPU and memory must use supported Fargate combinations.",
+      "Application Load Balancer is recommended for public HTTP services.",
+      "Use Service Auto Scaling for steady production workloads."
+    ],
+    "functions": [
+      "AWS Lambda maximum execution timeout is 15 minutes.",
+      "Deployment package and container image size limits apply.",
+      "Use provisioned concurrency for latency-sensitive workloads."
+    ],
+    "database": [
+      "RDS instance family and storage limits vary by engine and region.",
+      "Multi-AZ deployment increases availability and cost.",
+      "Backups and maintenance windows should be explicitly configured."
+    ],
+    "storage": [
+      "S3 object size limit is 5 TB.",
+      "Versioning and lifecycle policies should be enabled for durable workloads.",
+      "Public access should remain blocked unless explicitly required."
+    ]
+  },
+  "runtime_support": {
+    "Amazon ECS Fargate": ["python", "node", "java", ".net", "go", "ruby", "php"],
+    "AWS Lambda": ["python", "node", "java", ".net", "go", "ruby"]
+  }
+}

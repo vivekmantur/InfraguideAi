@@ -81,7 +81,7 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
     strategy = strategy_result.strategy
     fallback_roadmap = _roadmap(strategy, analysis, provider)
     architecture_summary = _architecture_summary(analysis)
-    fallback_governance = _governance(analysis)
+    fallback_governance = _governance(analysis, provider)
     governance, opportunities, roadmap, guidance_warnings = generate_migration_guidance(
         analysis,
         request.requirements,
@@ -1006,26 +1006,78 @@ async def _cost_estimate(
 
 def _modernization_opportunities(analysis: RepositoryAnalysis, provider: str) -> list[str]:
     cloud = SERVICE_MAP[provider]
+    stack = _join(
+        analysis.frameworks
+        or analysis.runtimes
+        or analysis.languages
+    )
     opportunities = [
-        f"Move secrets and connection strings to {cloud['secrets']}.",
-        f"Centralize logs and metrics with {cloud['monitoring']}.",
+        (
+            f"Externalize configuration and secrets for the detected "
+            f"{stack} workload into {cloud['secrets']}."
+        ),
+        (
+            f"Centralize application logs and runtime metrics from "
+            f"{stack} into {cloud['monitoring']}."
+        ),
     ]
+
     if "Azure Functions" in analysis.frameworks:
         opportunities.append("Keep the workload serverless and evaluate Azure Functions Premium Plan only if cold start, VNet, or scaling guarantees are required.")
         opportunities.append("Enable managed identity for function-to-storage and function-to-secret access.")
+
     if analysis.databases:
-        opportunities.append(f"Move database workloads to a managed service such as {cloud['database']}.")
+        opportunities.append(
+            (
+                f"Plan managed database migration for {_join(analysis.databases)} "
+                f"using {cloud['database']}."
+            )
+        )
+
+    if analysis.package_managers:
+        opportunities.append(
+            (
+                f"Add dependency restore, vulnerability scanning, and build "
+                f"validation for {_join(analysis.package_managers)} packages."
+            )
+        )
+
     if "Azure Functions" in analysis.frameworks:
         opportunities.append(f"Deploy function code to {cloud['function']} rather than introducing containers unless custom runtime needs appear.")
     elif not analysis.container_configs:
-        opportunities.append("Add Dockerfile and deployment pipeline for repeatable cloud releases.")
+        opportunities.append(
+            (
+                f"Add a Dockerfile for the detected {stack} application "
+                f"so it can be deployed repeatably to {cloud['container']}."
+            )
+        )
     else:
-        opportunities.append(f"Deploy existing containers to {cloud['container']}.")
+        opportunities.append(
+            (
+                f"Use existing container configuration ({_join(analysis.container_configs)}) "
+                f"as the deployment base for {cloud['container']}."
+            )
+        )
+
     if not analysis.cicd_configs:
-        opportunities.append("Add CI/CD workflow with build, test, scan, approval, and deployment stages.")
+        opportunities.append(
+            (
+                f"Add CI/CD workflow for {_join(analysis.package_managers) if analysis.package_managers else 'the detected application stack'} "
+                "with build, test, scan, approval, and deployment stages."
+            )
+        )
+    else:
+        opportunities.append(
+            (
+                f"Extend detected CI/CD configuration ({_join(analysis.cicd_configs)}) "
+                f"with cloud deployment approvals and post-deploy smoke tests."
+            )
+        )
+
     if analysis.governance_findings:
         opportunities.append("Resolve governance findings before production cutover.")
-    return opportunities
+
+    return _dedupe(opportunities)
 
 
 def _strategy(request: AssessmentRequest | FolderAssessmentRequest, readiness: ReadinessAssessment) -> str:
@@ -1038,27 +1090,94 @@ def _strategy(request: AssessmentRequest | FolderAssessmentRequest, readiness: R
 
 
 def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list[str]:
+    stack = _join(
+        analysis.frameworks
+        or analysis.runtimes
+        or analysis.languages
+    )
+    package_step = (
+        f"validate {_join(analysis.package_managers)} dependency restore and build commands"
+        if analysis.package_managers
+        else "document dependency restore and build commands"
+    )
+
     if "Azure Functions" in analysis.frameworks:
         steps = [
-            "Repository Preparation: document Python version, function triggers, app settings, bindings, and package dependencies.",
-            "Serverless Runtime Setup: create target Function App plan, storage account, managed identity, secrets, and monitoring workspace.",
-            "CI/CD: publish function artifacts through GitHub Actions or Azure Pipelines with approval gates.",
+            (
+                f"Repository Preparation: document detected serverless runtime "
+                f"({_join(analysis.runtimes)}) triggers, app settings, bindings, "
+                f"and {package_step}."
+            ),
+            (
+                f"Serverless Runtime Setup: create target {provider} function runtime, "
+                "storage account, managed identity, secrets, and monitoring workspace."
+            ),
         ]
     else:
         steps = [
-            "Repository Preparation: document runtime, dependencies, environment variables, and build commands.",
-            "Containerization and CI/CD: create or validate container image and automated deployment workflow.",
+            (
+                f"Repository Preparation: document detected {stack} runtime, "
+                f"environment variables, and {package_step}."
+            ),
         ]
+
+        if analysis.container_configs:
+            steps.append(
+                (
+                    f"Containerization: validate existing container artifacts "
+                    f"({_join(analysis.container_configs)}) and publish a versioned image."
+                )
+            )
+        else:
+            steps.append(
+                (
+                    f"Containerization: create a Dockerfile for the {stack} workload "
+                    "and verify local build/run behavior."
+                )
+            )
+
+    if analysis.cicd_configs:
+        steps.append(
+            (
+                f"CI/CD: extend detected pipeline configuration ({_join(analysis.cicd_configs)}) "
+                "with image build, security scan, approval, and deployment stages."
+            )
+        )
+    else:
+        steps.append(
+            (
+                f"CI/CD: add a pipeline for {_join(analysis.package_managers) if analysis.package_managers else stack} "
+                "build, test, security scan, approval, and cloud deployment."
+            )
+        )
+
     if analysis.databases:
-        steps.append("Database Migration: plan schema migration, backup, validation, and managed database cutover.")
+        steps.append(
+            (
+                f"Database Migration: plan {_join(analysis.databases)} schema migration, "
+                "backup, validation, connection string rotation, and managed database cutover."
+            )
+        )
+
     steps.extend(
         [
-            f"Cloud Service Setup: provision target {provider} runtime, storage, secrets, and monitoring services.",
-            "Validation: run smoke tests, performance checks, security review, and rollback rehearsal.",
-            f"Production Cutover: execute {strategy.lower()} migration, monitor live traffic, and optimize costs.",
+            (
+                f"Cloud Service Setup: provision target {provider} runtime for {stack}, "
+                "storage, secrets, monitoring, and network access."
+            ),
+            (
+                f"Validation: run smoke tests for detected HTTP/runtime flows "
+                f"({_join(analysis.triggers) if analysis.triggers else 'application entry points'}), "
+                "performance checks, security review, and rollback rehearsal."
+            ),
+            (
+                f"Production Cutover: execute {strategy.lower()} migration, monitor "
+                f"{stack} live traffic, and optimize cloud costs."
+            ),
         ]
     )
-    return steps
+
+    return _dedupe(steps)
 
 
 def _architecture_summary(analysis: RepositoryAnalysis) -> str:
@@ -1071,29 +1190,112 @@ def _architecture_summary(analysis: RepositoryAnalysis) -> str:
     return f"{analysis.architecture_pattern}. {readiness}. Detected stack includes {_join(analysis.frameworks or analysis.languages)}."
 
 
-def _governance(analysis: RepositoryAnalysis) -> GovernanceAssessment:
+def _governance(analysis: RepositoryAnalysis, provider: str) -> GovernanceAssessment:
     issues = list(analysis.governance_findings)
     passed_checks: list[str] = []
+    cloud = SERVICE_MAP[provider]
+    stack = _join(
+        analysis.frameworks
+        or analysis.runtimes
+        or analysis.languages
+    )
     recommendations = [
-        "Use managed identity for cloud resource access.",
-        "Store secrets and connection strings in the provider secret manager.",
-        "Enable centralized audit logs, metrics, alerts, and retention policies.",
-        "Add RBAC review and least-privilege deployment permissions before production cutover.",
+        (
+            f"Store {stack} secrets, connection strings, and environment values "
+            f"in {cloud['secrets']}."
+        ),
+        (
+            f"Enable centralized logs, metrics, alerts, and retention policies "
+            f"with {cloud['monitoring']}."
+        ),
+        (
+            f"Add {provider} RBAC review and least-privilege deployment "
+            "permissions before production cutover."
+        ),
     ]
 
     if not analysis.governance_findings:
         passed_checks.append("No hardcoded credentials, public storage ACLs, debug flags, or open container ports were detected in scanned files.")
     if analysis.package_managers:
-        passed_checks.append("Package dependency metadata was detected for repeatable builds.")
+        passed_checks.append(
+            (
+                f"Package dependency metadata was detected "
+                f"({_join(analysis.package_managers)}) for repeatable builds."
+            )
+        )
+        recommendations.append(
+            (
+                f"Add dependency scanning and lockfile review for "
+                f"{_join(analysis.package_managers)} packages."
+            )
+        )
+    else:
+        issues.append(
+            (
+                f"No package manager metadata was detected for the {stack} workload, "
+                "so dependency restore and vulnerability scanning need manual definition."
+            )
+        )
     if "Azure Functions" in analysis.frameworks:
         passed_checks.append("Serverless runtime reduces host and container patching responsibility.")
+    if analysis.container_configs:
+        passed_checks.append(
+            (
+                f"Container configuration was detected "
+                f"({_join(analysis.container_configs)}), supporting portable deployment."
+            )
+        )
+    if analysis.cicd_configs:
+        passed_checks.append(
+            (
+                f"CI/CD configuration was detected ({_join(analysis.cicd_configs)})."
+            )
+        )
+    if analysis.infrastructure_configs:
+        passed_checks.append(
+            (
+                f"Infrastructure-as-code configuration was detected "
+                f"({_join(analysis.infrastructure_configs)})."
+            )
+        )
 
     if not analysis.cicd_configs:
-        issues.append("No CI/CD workflow was detected for controlled release governance.")
+        issues.append(
+            (
+                f"No CI/CD workflow was detected for the {stack} workload."
+            )
+        )
     if not analysis.infrastructure_configs:
-        issues.append("No infrastructure-as-code configuration was detected.")
+        issues.append(
+            (
+                f"No infrastructure-as-code configuration was detected for "
+                f"provisioning {provider} resources."
+            )
+        )
     if not analysis.container_configs and "Azure Functions" not in analysis.frameworks:
-        issues.append("No container configuration was detected for portable deployment.")
+        issues.append(
+            (
+                f"No container configuration was detected for the {stack} application."
+            )
+        )
+    if analysis.databases:
+        recommendations.append(
+            (
+                f"Validate {_join(analysis.databases)} backup, restore, encryption, "
+                "and migration permissions before cutover."
+            )
+        )
+        if not analysis.infrastructure_configs:
+            issues.append(
+                (
+                    f"Detected {_join(analysis.databases)} dependency has no matching "
+                    "infrastructure-as-code definition for repeatable database provisioning."
+                )
+            )
+    else:
+        passed_checks.append(
+            "No persistent database dependency was detected in scanned files."
+        )
 
     high_risk_tokens = ["secret", "credential", "public storage", "open container"]
     if any(any(token in issue.lower() for token in high_risk_tokens) for issue in issues):
@@ -1136,6 +1338,19 @@ def _user_visible_warnings(warnings: list[str]) -> list[str]:
 
 def _join(items: list[str]) -> str:
     return ", ".join(items) if items else "Not detected"
+
+
+def _dedupe(items: list[str]) -> list[str]:
+    deduped: list[str] = []
+    seen: set[str] = set()
+
+    for item in items:
+        if item in seen:
+            continue
+        deduped.append(item)
+        seen.add(item)
+
+    return deduped
 
 
 def _bullet_list(items: list[str]) -> str:

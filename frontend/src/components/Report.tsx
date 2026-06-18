@@ -1,6 +1,7 @@
 import React from "react";
 import { ArrowDownToLine } from "lucide-react";
-import type { Assessment, RegionalPrice } from "../types";
+import { fetchRuntimeSupport, fetchServiceAvailability, parseRuntimeSupport, parseServiceAvailability } from "../api/cloudIntelligence";
+import type { Assessment, RegionalPrice, RuntimeSupportResult, ServiceAvailabilityResult } from "../types";
 import { formatMoney, list } from "../utils/format";
 import { KeyValue, List, Panel } from "./common";
 import { RegionalPricingModal } from "./RegionalPricingModal";
@@ -8,6 +9,9 @@ import { RegionalPricingModal } from "./RegionalPricingModal";
 export function Report({ assessment, onDownload }: { assessment: Assessment; onDownload: () => void }) {
   const [isPricingModalOpen, setIsPricingModalOpen] = React.useState(false);
   const [appliedRegionalPrice, setAppliedRegionalPrice] = React.useState<RegionalPrice | null>(null);
+  const [serviceAvailability, setServiceAvailability] = React.useState<ServiceAvailabilityResult | null>(null);
+  const [runtimeSupport, setRuntimeSupport] = React.useState<RuntimeSupportResult | null>(null);
+  const [cloudIntelligenceError, setCloudIntelligenceError] = React.useState("");
   const governance = assessment.governance_assessment ?? {
     risk_level: "Not assessed",
     issues: [],
@@ -18,12 +22,60 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
   const activeMonthlyValue = appliedRegionalPrice ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly) : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.monthly);
   const activeAnnualValue = appliedRegionalPrice ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly * 12) : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.annual);
   const activeRangeValue = appliedRegionalPrice ? `${appliedRegionalPrice.region} selected` : assessment.cost_estimation.monthly_range ?? "Not estimated";
+  const activeRegion = appliedRegionalPrice?.region ?? defaultRegion(assessment.recommended_provider);
+  const targetRuntimeService = applicationRuntimeService(assessment);
   const activeLineItems = appliedRegionalPrice
     ? [
         `${appliedRegionalPrice.runtime_sku || "Runtime"} in ${appliedRegionalPrice.region}: ${formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.runtime_monthly)}/month`,
         ...((appliedRegionalPrice.service_breakdown ?? []).map((service) => `${service.component}: ${service.recommended ?? "Managed service"}: ${formatMoney(service.currency ?? appliedRegionalPrice.currency, service.monthly_cost)}/month`)),
       ]
     : assessment.cost_estimation.line_items;
+
+  React.useEffect(() => {
+    let isActive = true;
+
+    async function loadCloudIntelligence() {
+      setCloudIntelligenceError("");
+
+      try {
+        const [availabilityResponse, runtimeResponse] = await Promise.all([
+          fetchServiceAvailability({
+            provider: assessment.recommended_provider,
+            region: activeRegion,
+            services: assessment.recommended_services,
+          }),
+          fetchRuntimeSupport({
+            provider: assessment.recommended_provider,
+            targetService: targetRuntimeService,
+            runtimes: assessment.technology_stack.runtimes ?? [],
+            frameworks: assessment.technology_stack.frameworks ?? [],
+          }),
+        ]);
+
+        const [availability, runtime] = await Promise.all([
+          parseServiceAvailability(availabilityResponse),
+          parseRuntimeSupport(runtimeResponse),
+        ]);
+
+        if (isActive) {
+          setServiceAvailability(availability);
+          setRuntimeSupport(runtime);
+        }
+      } catch (caught) {
+        if (isActive) {
+          setServiceAvailability(null);
+          setRuntimeSupport(null);
+          setCloudIntelligenceError(caught instanceof Error ? caught.message : "Cloud intelligence lookup failed");
+        }
+      }
+    }
+
+    loadCloudIntelligence();
+
+    return () => {
+      isActive = false;
+    };
+  }, [assessment, activeRegion, targetRuntimeService]);
 
   return (
     <div>
@@ -73,6 +125,55 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
               </div>
             ))}
           </div>
+        </Panel>
+
+        <Panel title="Cloud Service Validation">
+          {serviceAvailability ? (
+            <>
+              <KeyValue label="Region" value={serviceAvailability.region} />
+              <KeyValue label="Catalog" value={`${serviceAvailability.catalog_source ?? "catalog"} ${serviceAvailability.catalog_version ?? ""}`.trim()} />
+              <KeyValue label="Region Support" value={serviceAvailability.region_supported ? "Supported" : "Not supported"} />
+              <div className="mt-4">
+                <div className="mb-2 text-sm font-semibold text-ink/70">Available Services</div>
+                <List items={serviceAvailability.available.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
+              </div>
+              {serviceAvailability.unavailable.length > 0 && (
+                <div className="mt-4">
+                  <div className="mb-2 text-sm font-semibold text-ink/70">Needs Review</div>
+                  <List items={serviceAvailability.unavailable.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
+                </div>
+              )}
+              {serviceAvailability.notes.length > 0 && (
+                <div className="mt-4">
+                  <List items={serviceAvailability.notes} />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm leading-6 text-ink/65">{cloudIntelligenceError || "Checking service availability..."}</p>
+          )}
+        </Panel>
+
+        <Panel title="Runtime Compatibility">
+          {runtimeSupport ? (
+            <>
+              <KeyValue label="Target" value={runtimeSupport.target_service} />
+              <KeyValue label="Status" value={runtimeSupport.supported ? "Supported" : "Needs review"} />
+              <KeyValue label="Detected" value={list(runtimeSupport.supported_runtimes)} />
+              {runtimeSupport.unsupported_runtimes.length > 0 && <KeyValue label="Unsupported" value={list(runtimeSupport.unsupported_runtimes)} />}
+              <div className="mt-4">
+                <div className="mb-2 text-sm font-semibold text-ink/70">Catalog Supports</div>
+                <List items={runtimeSupport.catalog_supported_runtimes} />
+              </div>
+              {runtimeSupport.notes.length > 0 && (
+                <div className="mt-4">
+                  <List items={runtimeSupport.notes} />
+                </div>
+              )}
+            </>
+          ) : (
+            <p className="text-sm leading-6 text-ink/65">{cloudIntelligenceError || "Checking runtime compatibility..."}</p>
+          )}
         </Panel>
 
         <Panel
@@ -129,5 +230,19 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
         />
       )}
     </div>
+  );
+}
+
+function defaultRegion(provider: string) {
+  if (provider === "Azure") return "eastus";
+  if (provider === "GCP") return "us-central1";
+  return "us-east-1";
+}
+
+function applicationRuntimeService(assessment: Assessment) {
+  return (
+    assessment.recommended_services.find((service) => service.component.toLowerCase() === "application runtime")?.recommended ??
+    assessment.recommended_services[0]?.recommended ??
+    `${assessment.recommended_provider} runtime`
   );
 }

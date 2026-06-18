@@ -1,3 +1,30 @@
+import os
+import sys
+from pathlib import Path
+
+
+def _prefer_project_venv_packages() -> None:
+    project_dir = Path(__file__).resolve().parent
+    site_packages = (
+        project_dir / ".venv" / "Lib" / "site-packages"
+        if os.name == "nt"
+        else project_dir
+        / ".venv"
+        / "lib"
+        / f"python{sys.version_info.major}.{sys.version_info.minor}"
+        / "site-packages"
+    )
+
+    if not site_packages.exists():
+        return
+
+    site_packages_path = str(site_packages)
+    if site_packages_path not in sys.path:
+        sys.path.insert(0, site_packages_path)
+
+
+_prefer_project_venv_packages()
+
 from fastapi import FastAPI, Request
 from mcp import ClientSession
 from mcp.client.streamable_http import (
@@ -7,6 +34,59 @@ from mcp.client.streamable_http import (
 import json
 
 app = FastAPI()
+
+
+async def call_mcp_tool(
+    tool_name: str,
+    arguments: dict | None = None
+) -> dict:
+
+    async with streamablehttp_client(
+        "http://127.0.0.1:8000/mcp"
+    ) as (
+        read_stream,
+        write_stream,
+        _
+    ):
+
+        async with ClientSession(
+            read_stream,
+            write_stream
+        ) as session:
+
+            await session.initialize()
+
+            result = await session.call_tool(
+                tool_name,
+                arguments=arguments or {}
+            )
+
+            if getattr(
+                result,
+                "structuredContent",
+                None
+            ):
+                return result.structuredContent
+
+            if (
+                result.content
+                and len(result.content) > 0
+            ):
+                text = result.content[0].text
+
+                try:
+                    return json.loads(text)
+
+                except Exception as ex:
+                    return {
+                        "error":
+                            f"Unable to parse MCP response: {str(ex)}"
+                    }
+
+            return {
+                "error":
+                    f"No content returned from MCP tool {tool_name}"
+            }
 
 
 @app.middleware("http")
@@ -439,3 +519,61 @@ async def get_azure_regional_pricing(
                 "error":
                     "No content returned from Azure regional MCP"
             }
+
+
+@app.get("/cloud-intelligence/health")
+async def cloud_intelligence_health():
+    return await call_mcp_tool(
+        "health_check_cloud_intelligence"
+    )
+
+
+@app.post("/cloud-intelligence/service-availability")
+async def check_service_availability(
+    payload: dict
+):
+    return await call_mcp_tool(
+        "check_service_availability",
+        {
+            "provider": payload["provider"],
+            "region": payload["region"],
+            "services": payload.get(
+                "services",
+                []
+            )
+        }
+    )
+
+
+@app.post("/cloud-intelligence/runtime-support")
+async def check_runtime_support(
+    payload: dict
+):
+    return await call_mcp_tool(
+        "check_runtime_support",
+        {
+            "provider": payload["provider"],
+            "target_service": payload["target_service"],
+            "runtimes": payload.get(
+                "runtimes",
+                []
+            ),
+            "frameworks": payload.get(
+                "frameworks",
+                []
+            )
+        }
+    )
+
+
+@app.post("/cloud-intelligence/service-limits")
+async def get_service_limits(
+    payload: dict
+):
+    return await call_mcp_tool(
+        "get_service_limits",
+        {
+            "provider": payload["provider"],
+            "service": payload["service"]
+        }
+    )

@@ -152,3 +152,91 @@ class CloudMcpClient:
             response.raise_for_status()
 
             return response.json()
+
+    async def health_check_cloud_intelligence(
+        self
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=15
+        ) as client:
+
+            response = await client.get(
+                f"{self.base_url}/cloud-intelligence/health"
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def check_service_availability(
+        self,
+        provider: str,
+        region: str,
+        services: list[dict]
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=30
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/cloud-intelligence/service-availability",
+                json={
+                    "provider": provider,
+                    "region": region,
+                    "services": services
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def check_runtime_support(
+        self,
+        provider: str,
+        target_service: str,
+        runtimes: list[str],
+        frameworks: list[str] | None = None
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=30
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/cloud-intelligence/runtime-support",
+                json={
+                    "provider": provider,
+                    "target_service": target_service,
+                    "runtimes": runtimes,
+                    "frameworks": frameworks or []
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def get_service_limits(
+        self,
+        provider: str,
+        service: str
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=30
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/cloud-intelligence/service-limits",
+                json={
+                    "provider": provider,
+                    "service": service
+                }
+            )
+
+            response.raise_for_status()
+
+            return response.json()

@@ -1,0 +1,67 @@
+{
+  "provider": "Azure",
+  "source": "local_catalog",
+  "version": "2026-06-18",
+  "regions": [
+    "eastus",
+    "eastus2",
+    "centralus",
+    "westus",
+    "westus2",
+    "westus3",
+    "southcentralus",
+    "northeurope",
+    "westeurope",
+    "uksouth",
+    "germanywestcentral",
+    "francecentral",
+    "switzerlandnorth",
+    "canadacentral",
+    "brazilsouth",
+    "centralindia",
+    "southindia",
+    "southeastasia",
+    "eastasia",
+    "japaneast",
+    "koreacentral",
+    "australiaeast"
+  ],
+  "service_aliases": {
+    "azure container apps": "compute",
+    "azure functions premium plan": "functions",
+    "azure functions": "functions",
+    "azure sql database": "database",
+    "azure database for postgresql": "database",
+    "azure blob storage": "storage",
+    "azure key vault": "secrets",
+    "azure monitor": "monitoring",
+    "azure cache for redis": "cache"
+  },
+  "service_limits": {
+    "compute": [
+      "Azure Container Apps supports CPU and memory limits per replica.",
+      "Autoscaling can be driven by HTTP, CPU, memory, or KEDA events.",
+      "Use managed identity for access to Azure services."
+    ],
+    "functions": [
+      "Function timeout depends on hosting plan.",
+      "Premium plan is preferred for VNet integration and predictable warm instances.",
+      "Storage account and Application Insights are required supporting resources."
+    ],
+    "database": [
+      "Managed database tier, storage, and backup limits vary by engine.",
+      "Private networking and firewall rules should be configured before cutover.",
+      "Zone redundancy availability depends on region and tier."
+    ],
+    "storage": [
+      "Blob Storage supports hot, cool, cold, and archive access tiers.",
+      "Soft delete and versioning should be enabled for critical data.",
+      "Public blob access should remain disabled unless explicitly required."
+    ]
+  },
+  "runtime_support": {
+    "Azure Container Apps": ["python", "node", "java", ".net", "go", "ruby", "php"],
+    "Azure Functions": ["python", "node", "java", ".net", "powershell"],
+    "Azure Functions Premium Plan": ["python", "node", "java", ".net", "powershell"]
+  }
+}

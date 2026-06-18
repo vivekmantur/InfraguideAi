@@ -59,12 +59,12 @@ if WINDOWS_GIT.exists() and "GIT_PYTHON_GIT_EXECUTABLE" not in os.environ:
 
 def analyze_repository(repository_url: str, migration_requirements,github_token: str | None = None) -> tuple[RepositoryAnalysis, list[str]]:
     warnings: list[str] = []
-    temp_root = Path("D:/InfraGuideTemp")
+    temp_root = Path(__file__).resolve().parents[2] / ".tmp" / "repo-clones"
     temp_root.mkdir(parents=True, exist_ok=True)
     tmp_dir = Path(
     tempfile.mkdtemp(
         prefix="infraguide-",
-        dir="D:/InfraGuideTemp"
+        dir=temp_root
     )
 )
     
@@ -400,21 +400,36 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
     or "microsoft.entityframeworkcore.sqlserver" in evidence_text,
     "SQL Server"
 )
+    is_dotnet_project = (
+        ".cs" in suffixes
+        or "asp.net" in evidence_text
+        or "microsoft.entityframeworkcore" in evidence_text
+    )
     _append_if(
-    frameworks,
-    "dbcontext" in evidence_text
-    or "entityframeworkcore" in evidence_text
-    or any("/migrations/" in path.lower() for path in paths),
-    "Entity Framework Core"
-)
-    _append_if(frameworks,"addcontrollers" in evidence_text or "addcontrollerswithviews" in evidence_text or any("/controllers/" in path.lower() for path in paths),
-    "ASP.NET Core"
-)
+        frameworks,
+        is_dotnet_project
+        and (
+            "dbcontext" in evidence_text
+            or "entityframeworkcore" in evidence_text
+            or any("/migrations/" in path.lower() for path in paths)
+        ),
+        "Entity Framework Core",
+    )
+    _append_if(
+        frameworks,
+        is_dotnet_project
+        and (
+            "addcontrollers" in evidence_text
+            or "addcontrollerswithviews" in evidence_text
+            or any("/controllers/" in path.lower() for path in paths)
+        ),
+        "ASP.NET Core",
+    )
 
     _append_if(
         frameworks,
-        any("/views/" in path.lower() for path in paths),
-        "ASP.NET Core MVC"
+        is_dotnet_project and any("/views/" in path.lower() for path in paths),
+        "ASP.NET Core MVC",
     )
 
     _append_if(databases, _has_database_signal("mongodb", package_names, python_packages, evidence_text), "MongoDB")

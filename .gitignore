@@ -11,6 +11,7 @@ build/
 .vite/
 coverage/
 tmp/
+.tmp/
 reports/
 infraguide-ai-preview.png
 *.log

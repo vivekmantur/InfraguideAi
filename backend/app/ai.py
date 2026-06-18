@@ -154,8 +154,9 @@ Return JSON:
         print(json.dumps(data, indent=2))
 
         if not data:
-            warnings.append(
-                "LLM repository analysis returned an empty response. Using local repository analysis."
+            print(
+                "LLM repository analysis returned an empty response. "
+                "Using local repository analysis."
             )
             return fallback, warnings
 

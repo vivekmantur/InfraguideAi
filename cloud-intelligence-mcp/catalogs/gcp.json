@@ -1,0 +1,60 @@
+{
+  "provider": "GCP",
+  "source": "local_catalog",
+  "version": "2026-06-18",
+  "regions": [
+    "us-central1",
+    "us-east1",
+    "us-east4",
+    "us-west1",
+    "us-west2",
+    "northamerica-northeast1",
+    "southamerica-east1",
+    "europe-west1",
+    "europe-west2",
+    "europe-west3",
+    "europe-west4",
+    "europe-north1",
+    "asia-south1",
+    "asia-east1",
+    "asia-east2",
+    "asia-northeast1",
+    "asia-southeast1",
+    "australia-southeast1"
+  ],
+  "service_aliases": {
+    "cloud run": "compute",
+    "cloud functions": "functions",
+    "cloud sql": "database",
+    "cloud storage": "storage",
+    "secret manager": "secrets",
+    "cloud monitoring": "monitoring",
+    "memorystore": "cache"
+  },
+  "service_limits": {
+    "compute": [
+      "Cloud Run container instances have configurable CPU, memory, and concurrency.",
+      "Request timeout and max instance settings should match workload behavior.",
+      "Use service accounts with least privilege."
+    ],
+    "functions": [
+      "Cloud Functions generation and runtime choice affects timeout and scaling limits.",
+      "Event trigger availability depends on region.",
+      "Use Cloud Run functions for newer event-driven workloads."
+    ],
+    "database": [
+      "Cloud SQL machine type, storage, and HA availability vary by engine and region.",
+      "Private IP and authorized networks should be configured before cutover.",
+      "Automated backups and point-in-time recovery should be reviewed."
+    ],
+    "storage": [
+      "Cloud Storage objects support lifecycle policies and retention controls.",
+      "Bucket location type affects latency, availability, and cost.",
+      "Uniform bucket-level access is recommended."
+    ]
+  },
+  "runtime_support": {
+    "Cloud Run": ["python", "node", "java", ".net", "go", "ruby", "php"],
+    "Cloud Functions": ["python", "node", "java", ".net", "go", "ruby", "php"]
+  }
+}

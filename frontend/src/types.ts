@@ -91,3 +91,34 @@ export type Assessment = {
   blueprint_markdown: string;
   warnings: string[];
 };
+
+export type ServiceAvailabilityResult = {
+  provider: string;
+  region: string;
+  catalog_source?: string;
+  catalog_version?: string;
+  region_supported: boolean;
+  available: Array<{
+    component?: string;
+    service: string;
+    category: string;
+  }>;
+  unavailable: Array<{
+    component?: string;
+    service: string;
+    category: string;
+  }>;
+  notes: string[];
+};
+
+export type RuntimeSupportResult = {
+  provider: string;
+  target_service: string;
+  catalog_source?: string;
+  catalog_version?: string;
+  supported: boolean;
+  supported_runtimes: string[];
+  unsupported_runtimes: string[];
+  catalog_supported_runtimes: string[];
+  notes: string[];
+};

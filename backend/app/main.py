@@ -129,6 +129,64 @@ async def regional_pricing(payload: dict):
     raise HTTPException(status_code=400, detail="Regional pricing is available for Azure and GCP only.")
 
 
+@app.get("/cloud-intelligence/health")
+async def cloud_intelligence_health():
+    mcp_client = CloudMcpClient()
+
+    try:
+        return await mcp_client.health_check_cloud_intelligence()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Cloud intelligence health check failed: {exc}") from exc
+
+
+@app.post("/cloud-intelligence/service-availability")
+async def service_availability(payload: dict):
+    mcp_client = CloudMcpClient()
+
+    try:
+        return await mcp_client.check_service_availability(
+            payload["provider"],
+            payload["region"],
+            payload.get("services", [])
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {exc.args[0]}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Service availability check failed: {exc}") from exc
+
+
+@app.post("/cloud-intelligence/runtime-support")
+async def runtime_support(payload: dict):
+    mcp_client = CloudMcpClient()
+
+    try:
+        return await mcp_client.check_runtime_support(
+            payload["provider"],
+            payload["target_service"],
+            payload.get("runtimes", []),
+            payload.get("frameworks", [])
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {exc.args[0]}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Runtime support check failed: {exc}") from exc
+
+
+@app.post("/cloud-intelligence/service-limits")
+async def service_limits(payload: dict):
+    mcp_client = CloudMcpClient()
+
+    try:
+        return await mcp_client.get_service_limits(
+            payload["provider"],
+            payload["service"]
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail=f"Missing required field: {exc.args[0]}") from exc
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Service limits lookup failed: {exc}") from exc
+
+
 def _safe_upload_path(filename: str) -> Path | None:
     ignored_parts = {"", ".", "..", ".git", "node_modules", "vendor", "bin", "obj", "dist", "build", ".venv", "venv", "env", "__pycache__"}
     parts = list(PurePosixPath(filename.replace("\\", "/")).parts)
