@@ -3,6 +3,8 @@ from uuid import uuid4
 from .ai import (
     generate_architect_reasoning,
     generate_aws_pricing_estimate,
+    generate_migration_guidance,
+    generate_service_recommendations,
 )
 from .migration_strategy import determine_migration_strategy, assess_strategy_alignment
 from app.services.mcp_client import (
@@ -62,16 +64,35 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
     provider = _select_provider(request, analysis)
     readiness = _readiness(analysis)
     print(f"analysis: {analysis},provider:{provider}")
-    services = _services(provider, analysis)
+    fallback_services = _services(provider, analysis)
+    services, service_warnings = generate_service_recommendations(
+        analysis,
+        request.requirements,
+        provider,
+        strategy_result,
+        fallback_services,
+    )
+    warnings.extend(service_warnings)
     print(f"Recommended services for provider {services}")
     print(request.requirements.cloud_provider)
     cost = await _cost_estimate(request, analysis, services)
     print(f"Cost estimate for provider {provider}: {cost.monthly} INR/month with line items: {cost.line_items}")
-    opportunities = _modernization_opportunities(analysis, provider)
+    fallback_opportunities = _modernization_opportunities(analysis, provider)
     strategy = strategy_result.strategy
-    roadmap = _roadmap(strategy, analysis, provider)
+    fallback_roadmap = _roadmap(strategy, analysis, provider)
     architecture_summary = _architecture_summary(analysis)
-    governance = _governance(analysis)
+    fallback_governance = _governance(analysis)
+    governance, opportunities, roadmap, guidance_warnings = generate_migration_guidance(
+        analysis,
+        request.requirements,
+        provider,
+        strategy_result,
+        [item.model_dump() for item in services],
+        fallback_governance,
+        fallback_opportunities,
+        fallback_roadmap,
+    )
+    warnings.extend(guidance_warnings)
     ai_reasoning = generate_architect_reasoning(
         analysis,
         provider,
@@ -101,7 +122,7 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
         governance_assessment=governance,
         ai_reasoning=ai_reasoning,
         blueprint_markdown="",
-        warnings=warnings,
+        warnings=_user_visible_warnings(warnings),
         cloud_sizing=cloud_sizing,
         strategy_assessment=strategy_assessment,
     )
@@ -1096,6 +1117,21 @@ def _governance(analysis: RepositoryAnalysis) -> GovernanceAssessment:
         recommendations=recommendations,
         recommendation=recommendation,
     )
+
+
+def _user_visible_warnings(warnings: list[str]) -> list[str]:
+    internal_prefixes = (
+        "Groq is not configured.",
+        "LLM repository analysis",
+        "LLM migration guidance",
+        "LLM service recommendation",
+        "AWS pricing LLM",
+    )
+    return [
+        warning
+        for warning in warnings
+        if not warning.startswith(internal_prefixes)
+    ]
 
 
 def _join(items: list[str]) -> str:

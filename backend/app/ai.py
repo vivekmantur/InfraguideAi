@@ -7,7 +7,7 @@ from typing import Any
 import httpx
 
 from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_ENDPOINT
-from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, MigrationRequirements, RepositoryAnalysis,MigrationStrategyResult
+from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, GovernanceAssessment, MigrationRequirements, RepositoryAnalysis, ServiceRecommendation,MigrationStrategyResult
 
 
 AWS_PRICING_REGIONS = [
@@ -142,6 +142,7 @@ Return JSON:
         temperature=0.1,
         max_tokens=1000,
         response_format={"type": "json_object"},
+        label="repository-analysis",
     )
 
     print("LLM Content:", raw)
@@ -254,6 +255,299 @@ Requirements:
         fallback=fallback,
         temperature=0.25,
     )
+
+
+def generate_service_recommendations(
+    analysis: RepositoryAnalysis,
+    requirements: MigrationRequirements,
+    provider: str,
+    strategy: MigrationStrategyResult,
+    fallback_services: list[ServiceRecommendation],
+) -> tuple[list[ServiceRecommendation], list[str]]:
+    warnings: list[str] = []
+
+    if not is_groq_configured():
+        warnings.append(
+            "Groq is not configured. Using rule-based recommended services."
+        )
+        return fallback_services, warnings
+
+    service_signals = {
+        "application_type": analysis.application_type,
+        "architecture_pattern": analysis.architecture_pattern,
+        "hosting_model": analysis.hosting_model,
+        "deployment_model": analysis.deployment_model,
+        "languages": analysis.languages,
+        "frameworks": analysis.frameworks,
+        "runtimes": analysis.runtimes,
+        "databases": analysis.databases,
+        "storage_dependencies": analysis.storage_dependencies,
+        "cloud_dependencies": analysis.cloud_dependencies,
+        "container_configs": analysis.container_configs,
+        "infrastructure_configs": analysis.infrastructure_configs,
+        "cicd_configs": analysis.cicd_configs,
+        "cloud_sizing": analysis.cloud_sizing.model_dump() if analysis.cloud_sizing else None,
+    }
+
+    prompt = f"""
+You are a senior cloud migration architect. Recommend target cloud services for this application.
+
+Use ONLY the repository facts and service selection signals below. Do not invent detected databases,
+queues, caches, container platforms, CI/CD tools, or storage dependencies that are not present.
+
+Repository facts:
+{json.dumps(analysis.model_dump(), indent=2)}
+
+Service selection signals:
+{json.dumps(service_signals, indent=2)}
+
+Migration requirements:
+- Cloud provider: {requirements.cloud_provider.value}
+- Goal: {requirements.migration_goal.value}
+- Expected traffic: {requirements.expected_traffic.value}
+- Budget preference: {requirements.budget_preference.value}
+- Timeline: {requirements.migration_timeline.value}
+
+Selected provider: {provider}
+Recommended migration strategy:
+{json.dumps(strategy.model_dump(), indent=2)}
+
+Return strict JSON only in this shape:
+{{
+  "recommended_services": [
+    {{
+      "component": "",
+      "current": "",
+      "recommended": ""
+    }}
+  ]
+}}
+
+Rules:
+- Always include Application Runtime, Secrets, and Monitoring.
+- Include Database only when repository facts show a database dependency.
+- Include File Storage only when useful for application assets, uploads, static files, or cloud storage migration.
+- Add optional services such as API Gateway, CDN/WAF, Cache, Queue, Container Registry, or CI/CD only when justified by detected facts or migration requirements.
+- Use concrete {provider} service names.
+- Keep component names short and stable.
+- Keep current state factual, using "Not detected" when evidence is absent.
+- Return 3-8 services.
+- Do not use markdown.
+"""
+
+    raw = _chat_completion(
+        [
+            {
+                "role": "system",
+                "content": "You return strict JSON only. No markdown. No commentary.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        fallback="{}",
+        temperature=0.25,
+        max_tokens=1200,
+        response_format={"type": "json_object"},
+        label="service-recommendations",
+    )
+
+    try:
+        data = _load_json_object(raw)
+        service_rows = data.get("recommended_services")
+        if not isinstance(service_rows, list):
+            warnings.append(
+                "LLM service recommendation did not return a service list. Using rule-based services."
+            )
+            return fallback_services, warnings
+
+        services: list[ServiceRecommendation] = []
+        seen_components: set[str] = set()
+
+        for row in service_rows:
+            if not isinstance(row, dict):
+                continue
+            service = ServiceRecommendation.model_validate(row)
+            component_key = service.component.strip().lower()
+            if not service.component.strip() or component_key in seen_components:
+                continue
+            seen_components.add(component_key)
+            services.append(service)
+
+        if not services:
+            warnings.append(
+                "LLM service recommendation returned no usable services. Using rule-based services."
+            )
+            return fallback_services, warnings
+
+        if not any(service.component.lower() == "application runtime" for service in services):
+            services.insert(0, fallback_services[0])
+
+        return services[:8], warnings
+
+    except Exception as exc:
+        warnings.append(
+            f"LLM service recommendation failed: {exc}. Raw response preview: {_safe_preview(raw)}"
+        )
+        return fallback_services, warnings
+
+
+def generate_migration_guidance(
+    analysis: RepositoryAnalysis,
+    requirements: MigrationRequirements,
+    provider: str,
+    strategy: MigrationStrategyResult,
+    services: list[dict[str, str]],
+    fallback_governance: GovernanceAssessment,
+    fallback_opportunities: list[str],
+    fallback_roadmap: list[str],
+) -> tuple[GovernanceAssessment, list[str], list[str], list[str]]:
+    warnings: list[str] = []
+    security_signals = {
+        "governance_findings_from_repository": analysis.governance_findings,
+        "package_managers_detected": analysis.package_managers,
+        "container_configs_detected": analysis.container_configs,
+        "infrastructure_configs_detected": analysis.infrastructure_configs,
+        "cicd_configs_detected": analysis.cicd_configs,
+        "frameworks_detected": analysis.frameworks,
+        "runtimes_detected": analysis.runtimes,
+        "databases_detected": analysis.databases,
+        "cloud_dependencies_detected": analysis.cloud_dependencies,
+        "storage_dependencies_detected": analysis.storage_dependencies,
+    }
+    migration_signals = {
+        "application_type": analysis.application_type,
+        "architecture_pattern": analysis.architecture_pattern,
+        "hosting_model": analysis.hosting_model,
+        "deployment_model": analysis.deployment_model,
+        "languages": analysis.languages,
+        "frameworks": analysis.frameworks,
+        "runtimes": analysis.runtimes,
+        "databases": analysis.databases,
+        "package_managers": analysis.package_managers,
+        "container_configs": analysis.container_configs,
+        "infrastructure_configs": analysis.infrastructure_configs,
+        "cicd_configs": analysis.cicd_configs,
+        "dependency_graph": analysis.dependency_graph,
+        "cloud_sizing": analysis.cloud_sizing.model_dump() if analysis.cloud_sizing else None,
+    }
+
+    if not is_groq_configured():
+        warnings.append(
+            "Groq is not configured. Using rule-based security, modernization, and roadmap guidance."
+        )
+        return fallback_governance, fallback_opportunities, fallback_roadmap, warnings
+
+    prompt = f"""
+You are a senior cloud migration architect. Generate application-specific migration guidance.
+
+Use ONLY the repository facts and evidence signals below. Do not invent detected files,
+tools, databases, CI/CD systems, containers, or secrets that are not present in the facts.
+
+Repository facts:
+{json.dumps(analysis.model_dump(), indent=2)}
+
+Migration requirements:
+- Cloud provider: {requirements.cloud_provider.value}
+- Goal: {requirements.migration_goal.value}
+- Expected traffic: {requirements.expected_traffic.value}
+- Budget preference: {requirements.budget_preference.value}
+- Timeline: {requirements.migration_timeline.value}
+
+Selected provider: {provider}
+Recommended migration strategy:
+{json.dumps(strategy.model_dump(), indent=2)}
+
+Recommended services:
+{json.dumps(services, indent=2)}
+
+Security evidence signals:
+{json.dumps(security_signals, indent=2)}
+
+Migration planning signals:
+{json.dumps(migration_signals, indent=2)}
+
+Return strict JSON only in this shape:
+{{
+  "governance_assessment": {{
+    "risk_level": "Low|Medium|High",
+    "issues": [],
+    "passed_checks": [],
+    "recommendations": [],
+    "recommendation": ""
+  }},
+  "modernization_opportunities": [],
+  "migration_roadmap": []
+}}
+
+Rules:
+- Make the output specific to the detected stack, selected provider, strategy, and user requirements.
+- Keep each list item concise and action-oriented.
+- Include 3-7 modernization opportunities.
+- Include 5-8 roadmap steps in execution order.
+- Generate fresh security, modernization, and roadmap language from the evidence signals.
+- Keep factual findings grounded in repository facts. If something is absent, phrase it as not detected.
+- Do not claim a vulnerability exists unless it appears in governance_findings_from_repository.
+- Do not use markdown.
+"""
+
+    raw = _chat_completion(
+        [
+            {
+                "role": "system",
+                "content": "You return strict JSON only. No markdown. No commentary.",
+            },
+            {
+                "role": "user",
+                "content": prompt,
+            },
+        ],
+        fallback="{}",
+        temperature=0.35,
+        max_tokens=1800,
+        response_format={"type": "json_object"},
+        label="migration-guidance",
+    )
+
+    try:
+        data = _load_json_object(raw)
+        if not data:
+            warnings.append(
+                "LLM migration guidance returned an empty response. Using rule-based guidance."
+            )
+            return fallback_governance, fallback_opportunities, fallback_roadmap, warnings
+
+        governance_data = data.get("governance_assessment") or {}
+        opportunities = _string_list(data.get("modernization_opportunities"))
+        roadmap = _string_list(data.get("migration_roadmap"))
+
+        governance = GovernanceAssessment.model_validate(
+            {
+                **fallback_governance.model_dump(),
+                **governance_data,
+            }
+        )
+
+        if not opportunities:
+            warnings.append(
+                "LLM migration guidance did not return modernization opportunities. Using rule-based opportunities."
+            )
+            opportunities = fallback_opportunities
+
+        if not roadmap:
+            warnings.append(
+                "LLM migration guidance did not return a migration roadmap. Using rule-based roadmap."
+            )
+            roadmap = fallback_roadmap
+
+        return governance, opportunities, roadmap, warnings
+
+    except Exception as exc:
+        warnings.append(
+            f"LLM migration guidance failed: {exc}. Raw response preview: {_safe_preview(raw)}"
+        )
+        return fallback_governance, fallback_opportunities, fallback_roadmap, warnings
 
 
 def answer_migration_question(assessment: AssessmentResponse, message: str, history: list[ChatMessage]) -> str:
@@ -388,6 +682,7 @@ Return strict JSON only in this shape:
         temperature=0.15,
         max_tokens=4000,
         response_format={"type": "json_object"},
+        label="aws-pricing",
     )
 
     try:
@@ -420,6 +715,7 @@ def _chat(messages: list[dict[str, str]], fallback: str, temperature: float) -> 
         temperature=temperature,
         max_tokens=700,
         response_format=None,
+        label="chat",
     )
 
 
@@ -429,6 +725,7 @@ def _chat_completion(
     temperature: float,
     max_tokens: int,
     response_format: dict[str, str] | None,
+    label: str = "chat",
 ) -> str:
     api_key = GROQ_API_KEY
     if not api_key:
@@ -444,6 +741,12 @@ def _chat_completion(
         payload["response_format"] = response_format
 
     try:
+        print(
+            "Calling Groq:",
+            f"label={label}",
+            f"model={payload.get('model')}",
+            f"endpoint={GROQ_ENDPOINT}",
+        )
         with httpx.Client(timeout=90) as client:
             response = client.post(
                 GROQ_ENDPOINT,
@@ -453,9 +756,42 @@ def _chat_completion(
             response.raise_for_status()
             data = response.json()
             content = data["choices"][0]["message"]["content"].strip()
+            if not content:
+                print(
+                    "Groq returned an empty message content.",
+                    f"label={label}",
+                    f"model={payload.get('model')}",
+                    f"endpoint={GROQ_ENDPOINT}",
+                )
+            else:
+                print(
+                    "Groq response received:",
+                    f"label={label}",
+                    f"chars={len(content)}",
+                    f"preview={_safe_preview(content)}",
+                )
             return content or fallback
+    except httpx.HTTPStatusError as exc:
+        response_text = exc.response.text if exc.response is not None else ""
+        print(
+            "Groq API request failed:",
+            f"label={label}",
+            f"status={exc.response.status_code if exc.response is not None else 'unknown'}",
+            f"model={payload.get('model')}",
+            f"endpoint={GROQ_ENDPOINT}",
+            f"response={_safe_preview(response_text)}",
+        )
+        return fallback
     except Exception as exc:
-        return f"{fallback} AI generation warning: {exc}"
+        print(
+            "Groq API request failed:",
+            f"label={label}",
+            f"type={type(exc).__name__}",
+            f"model={payload.get('model')}",
+            f"endpoint={GROQ_ENDPOINT}",
+            f"error={exc}",
+        )
+        return fallback
 
 
 def _json_payload(content: str) -> str:
@@ -479,6 +815,12 @@ def _load_json_object(content: str) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("LLM response JSON must be an object.")
     return data
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
 
 def _safe_preview(content: str) -> str:

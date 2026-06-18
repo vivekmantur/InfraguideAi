@@ -86,6 +86,12 @@ body {
   padding: 0.55rem 0.85rem;
 }
 
+.main-panel {
+  height: calc(100vh - 2.5rem);
+  min-height: 42.5rem;
+  overflow: auto;
+}
+
 .clear-folder-button {
   display: inline-flex;
   align-items: center;
