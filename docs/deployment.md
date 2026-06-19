@@ -38,12 +38,14 @@ The server should already have:
 - This repo cloned at `/home/amisha/InfraguideAi`.
 - A production `.env` file at `/home/amisha/InfraguideAi/.env`.
 
-Set this in the server `.env` so the built frontend calls the server API:
+Use this in the server `.env` so the same code works locally and on the server:
 
 ```bash
-VITE_API_BASE_URL=http://62.72.30.227:9000
-CORS_ORIGINS=http://62.72.30.227:5174
+VITE_API_BASE_URL=
+CORS_ORIGINS=http://localhost:5173,http://localhost:5174,http://127.0.0.1:5173,http://127.0.0.1:5174,http://62.72.30.227:5174
 ```
+
+When `VITE_API_BASE_URL` is empty, the frontend automatically calls port `9000` on the same hostname used to open the app. For example, `http://localhost:5173` calls `http://localhost:9000`, and `http://62.72.30.227:5174` calls `http://62.72.30.227:9000`.
 
 Keep your existing cloud and AWS/GCP variables in the same `.env` file.
 
