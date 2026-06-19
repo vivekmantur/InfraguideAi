@@ -1,6 +1,8 @@
 import type { Requirements } from "./types";
 
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:9000";
+const defaultApiBaseUrl = `${window.location.protocol}//${window.location.hostname}:9000`;
+
+export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || defaultApiBaseUrl;
 export const MAX_UPLOAD_BYTES = 25 * 1024 * 1024;
 
 export const IGNORED_UPLOAD_PARTS = new Set([

@@ -1,3 +1,4 @@
+import os
 import shutil
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -14,15 +15,23 @@ from .services.mcp_client import CloudMcpClient
 app = FastAPI(title="InfraGuide AI API", version="0.1.0")
 
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
+DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174",
+    "http://62.72.30.227:5174",
+]
+
+
+def _cors_origins() -> list[str]:
+    configured_origins = os.getenv("CORS_ORIGINS", "")
+    origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
+    return origins or DEFAULT_CORS_ORIGINS
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:5174",
-        "http://127.0.0.1:5174",
-    ],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

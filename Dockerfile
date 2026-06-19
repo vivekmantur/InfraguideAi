@@ -6,7 +6,7 @@ COPY frontend/package*.json ./
 RUN npm ci
 
 COPY frontend/ ./
-ARG VITE_API_BASE_URL=http://localhost:9000
+ARG VITE_API_BASE_URL=
 ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
 RUN npm run build
 

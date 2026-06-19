@@ -1,0 +1,73 @@
+name: Deploy InfraGuide AI
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: infraguide-production
+  cancel-in-progress: true
+
+env:
+  DEPLOY_HOST: 62.72.30.227
+  DEPLOY_USER: root
+  APP_DIR: /home/amisha/InfraguideAi
+  DEPLOY_BRANCH: main
+
+jobs:
+  deploy:
+    name: Build and restart Docker app on server
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Configure SSH
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y sshpass
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          ssh-keyscan -H "$DEPLOY_HOST" >> ~/.ssh/known_hosts
+
+      - name: Deploy on Linux server
+        env:
+          SSHPASS: ${{ secrets.DEPLOY_SSH_PASSWORD }}
+        run: |
+          sshpass -e ssh "$DEPLOY_USER@$DEPLOY_HOST" \
+            "APP_DIR='$APP_DIR' DEPLOY_BRANCH='$DEPLOY_BRANCH' bash -s" <<'REMOTE'
+          set -euo pipefail
+
+          cd "$APP_DIR"
+
+          git config --global --add safe.directory "$APP_DIR"
+          git fetch origin "$DEPLOY_BRANCH"
+          git checkout "$DEPLOY_BRANCH"
+          git reset --hard "origin/$DEPLOY_BRANCH"
+
+          if docker info >/dev/null 2>&1; then
+            DOCKER_CMD="docker"
+          elif sudo -n docker info >/dev/null 2>&1; then
+            DOCKER_CMD="sudo docker"
+          else
+            echo "The $USER user cannot run Docker. Add it to the docker group or configure passwordless sudo." >&2
+            exit 1
+          fi
+
+          if $DOCKER_CMD compose version >/dev/null 2>&1; then
+            COMPOSE_CMD="$DOCKER_CMD compose"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            if [ "$DOCKER_CMD" = "sudo docker" ]; then
+              COMPOSE_CMD="sudo docker-compose"
+            else
+              COMPOSE_CMD="docker-compose"
+            fi
+          else
+            echo "Docker Compose is not installed on the server." >&2
+            exit 1
+          fi
+
+          $COMPOSE_CMD up -d --build --remove-orphans
+          $COMPOSE_CMD ps
+          $DOCKER_CMD image prune -f
+          REMOTE

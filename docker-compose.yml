@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
       args:
-        VITE_API_BASE_URL: http://localhost:9000
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-}
     container_name: infraguide-app
     env_file:
       - .env
