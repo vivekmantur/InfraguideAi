@@ -1,5 +1,5 @@
 import React from "react";
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { pricingRegions } from "../constants";
 import { fetchRegionalPricing } from "../api/pricing";
 import { responseErrorMessage } from "../api/assessments";
@@ -116,8 +116,12 @@ export function RegionalPricingModal({
         </div>
 
         {isLoadingRegions ? (
-          <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
-            Loading regional pricing from {provider}. This can take a little longer when the provider pricing catalog is paged by service and SKU.
+          <div className="flex min-h-[18rem] items-center justify-center rounded-md border border-ink/10 bg-cloud p-6">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <Loader2 className="animate-spin text-moss" size={34} aria-hidden="true" />
+              <div className="text-sm font-semibold text-ink">Loading {provider} regional pricing</div>
+              <div className="text-xs text-ink/60">Fetching provider catalog and service SKU costs.</div>
+            </div>
           </div>
         ) : regionalError ? (
           <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">{regionalError}</div>

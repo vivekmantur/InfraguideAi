@@ -1,0 +1,21 @@
+services:
+  infraguide-app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:9000
+    container_name: infraguide-app
+    env_file:
+      - .env
+    environment:
+      REDIS_URL: redis://host.docker.internal:6379/0
+      MCP_SERVER_URL: http://127.0.0.1:8000/mcp
+      MCP_BRIDGE_URL: http://127.0.0.1:8001
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      - "5174:5174"
+      - "9000:9000"
+      - "8001:8001"
+      - "8000:8000"

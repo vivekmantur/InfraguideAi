@@ -119,7 +119,7 @@ function footerXml() {
       </w:tc>
       <w:tc>
         <w:tcPr><w:tcW w:w="2160" w:type="dxa"/><w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>
-        ${paragraph("Confidential", { color: "6A756F", size: 17, align: "right" })}
+        ${pageNumberParagraph()}
       </w:tc>
     </w:tr>
   </w:tbl>
@@ -264,6 +264,20 @@ function paragraph(
   ].join("");
 
   return `<w:p><w:pPr>${props}</w:pPr><w:r><w:rPr>${runProps}</w:rPr><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`;
+}
+
+function pageNumberParagraph() {
+  const runProps = '<w:rPr><w:color w:val="6A756F"/><w:sz w:val="17"/></w:rPr>';
+  const fieldRun = (instruction: string, fallback: string) =>
+    `<w:fldSimple w:instr="${xmlEscape(instruction)}"><w:r>${runProps}<w:t>${fallback}</w:t></w:r></w:fldSimple>`;
+
+  return `<w:p>
+    <w:pPr><w:jc w:val="right"/><w:spacing w:after="120"/></w:pPr>
+    <w:r>${runProps}<w:t xml:space="preserve">Confidential | Page </w:t></w:r>
+    ${fieldRun("PAGE \\* MERGEFORMAT", "1")}
+    <w:r>${runProps}<w:t xml:space="preserve"> of </w:t></w:r>
+    ${fieldRun("NUMPAGES \\* MERGEFORMAT", "1")}
+  </w:p>`;
 }
 
 function listParagraphs(items: string[] | undefined, numbered = false) {

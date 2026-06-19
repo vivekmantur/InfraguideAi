@@ -1,13 +1,24 @@
+import os
+
 import httpx
+
+
+def _without_none(payload: dict) -> dict:
+    return {
+        key: value
+        for key, value in payload.items()
+        if value is not None
+    }
 
 
 class CloudMcpClient:
 
     def __init__(self):
 
-        self.base_url = (
+        self.base_url = os.getenv(
+            "MCP_BRIDGE_URL",
             "http://127.0.0.1:8001"
-        )
+        ).rstrip("/")
 
     async def get_gcp_compute_pricing(
         self,
@@ -90,13 +101,13 @@ class CloudMcpClient:
 
             response = await client.post(
                 f"{self.base_url}/pricing/gcp/regions",
-                json={
+                json=_without_none({
                     "cpu": cpu,
                     "memory": memory,
                     "services": services,
                     "limit": limit,
                     "region": region
-                }
+                })
             )
 
             response.raise_for_status()
@@ -140,13 +151,41 @@ class CloudMcpClient:
 
             response = await client.post(
                 f"{self.base_url}/pricing/azure/regions",
-                json={
+                json=_without_none({
                     "cpu": cpu,
                     "memory": memory,
                     "services": services,
                     "limit": limit,
                     "region": region
-                }
+                })
+            )
+
+            response.raise_for_status()
+
+            return response.json()
+
+    async def get_aws_regional_pricing(
+        self,
+        cpu: int,
+        memory: int,
+        services: list[dict],
+        limit: int = 10,
+        region: str | None = None
+    ) -> dict:
+
+        async with httpx.AsyncClient(
+            timeout=240
+        ) as client:
+
+            response = await client.post(
+                f"{self.base_url}/pricing/aws/regions",
+                json=_without_none({
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services,
+                    "limit": limit,
+                    "region": region
+                })
             )
 
             response.raise_for_status()

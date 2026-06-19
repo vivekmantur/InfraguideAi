@@ -688,16 +688,16 @@ class GcpPricingClient:
 
                 continue
 
-            for region in self._sku_regions(
+            for sku_region in self._sku_regions(
                 sku
             ):
 
-                if region == "global":
+                if sku_region == "global":
 
                     continue
 
                 by_region.setdefault(
-                    region,
+                    sku_region,
                     {}
                 )[kind] = sku["skuId"]
 
@@ -767,34 +767,28 @@ class GcpPricingClient:
                 ],
             }
 
-        selected_regions = sorted(
-            by_region.items(),
-            key=lambda item: (
-                self.COMMON_REGIONS.index(item[0])
-                if item[0] in self.COMMON_REGIONS
-                else len(self.COMMON_REGIONS),
-                item[0]
-            )
-        )
-
         if region:
-
-            selected_regions = [
-                item
-                for item in selected_regions
-                if item[0] == region
+            desired_regions = [region]
+        else:
+            desired_regions = self.COMMON_REGIONS[
+                :limit or len(self.COMMON_REGIONS)
             ]
 
-            if not selected_regions:
-
-                raise ValueError(
-                    f"No regional GCP compute pricing found "
-                    f"for {region}"
+        selected_regions = [
+            (
+                region_name,
+                by_region.get(
+                    region_name,
+                    {}
                 )
+            )
+            for region_name in desired_regions
+        ]
 
-        if limit:
-
-            selected_regions = selected_regions[:limit]
+        selected_region_names = [
+            item[0]
+            for item in selected_regions
+        ]
 
         computed_rows = await asyncio.gather(
             *[
@@ -811,14 +805,23 @@ class GcpPricingClient:
             if row is not None
         ]
 
-        if not rows:
+        missing_regions = [
+            region
+            for region in selected_region_names
+            if region not in {
+                row["region"]
+                for row in rows
+            }
+        ]
+
+        if missing_regions:
 
             fallback = await self.get_compute_price(
                 cpu,
                 memory
             )
 
-            return [
+            rows.extend(
                 {
                     "region": region,
                     "currency": fallback.get(
@@ -844,17 +847,24 @@ class GcpPricingClient:
                         "ram_sku"
                     ),
                 }
-                for region in self.COMMON_REGIONS[:limit or len(self.COMMON_REGIONS)]
-            ]
+                for region in missing_regions
+            )
 
         print(
             f"Loaded {len(rows)} regional GCP compute prices"
         )
 
-        return sorted(
+        ordered_rows = sorted(
             rows,
-            key=lambda item: item["region"]
+            key=lambda item: (
+                selected_region_names.index(item["region"])
+                if item["region"] in selected_region_names
+                else len(selected_region_names),
+                item["region"]
+            )
         )
+
+        return ordered_rows[:limit] if limit else ordered_rows
 
     async def get_service_prices(
         self,

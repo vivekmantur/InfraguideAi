@@ -1,5 +1,6 @@
 import os
 import sys
+import logging
 from pathlib import Path
 
 
@@ -24,6 +25,9 @@ def _prefer_project_venv_packages() -> None:
 
 
 _prefer_project_venv_packages()
+
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 from mcp.server.fastmcp import FastMCP
 

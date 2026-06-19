@@ -30,6 +30,12 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
         ...((appliedRegionalPrice.service_breakdown ?? []).map((service) => `${service.component}: ${service.recommended ?? "Managed service"}: ${formatMoney(service.currency ?? appliedRegionalPrice.currency, service.monthly_cost)}/month`)),
       ]
     : assessment.cost_estimation.line_items;
+  const activeAssumptions = appliedRegionalPrice
+    ? [
+        `Selected regional estimate: ${appliedRegionalPrice.region}.`,
+        "Applied region values are shown directly from the regional pricing comparison.",
+      ]
+    : assessment.cost_estimation.assumptions ?? [];
 
   React.useEffect(() => {
     let isActive = true;
@@ -192,6 +198,12 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
           <div className="mt-4">
             <List items={activeLineItems} />
           </div>
+          {activeAssumptions.length > 0 && (
+            <div className="mt-4 rounded-md bg-cloud p-3">
+              <div className="mb-2 text-xs font-bold uppercase text-ink/60">Pricing assumptions</div>
+              <List items={activeAssumptions} />
+            </div>
+          )}
         </Panel>
 
         <Panel title="Dependencies">

@@ -1,7 +1,9 @@
 from config import GCP_API_KEY
 
 from services.azure.pricing_client import AzurePricingClient
+from services.aws.pricing_client import AwsPricingClient
 from services.gcp.pricing_client import GcpPricingClient
+from services.pricing_cache import pricing_cache
 from services.azure.sku_selector import (
     select_vm_size
 )
@@ -12,6 +14,7 @@ if not GCP_API_KEY:
     )
 
 azure_client = AzurePricingClient()
+aws_client = AwsPricingClient()
 
 gcp_client = GcpPricingClient(
     api_key=GCP_API_KEY
@@ -88,7 +91,7 @@ def register_pricing_tools(mcp):
 
     @mcp.tool()
     async def get_gcp_service_pricing(
-        services: list[dict],
+        services: list,
         region: str = "us-central1"
     ) -> dict:
 
@@ -116,7 +119,7 @@ def register_pricing_tools(mcp):
 
     @mcp.tool()
     async def get_azure_service_pricing(
-        services: list[dict],
+        services: list,
         region: str = "eastus"
     ) -> dict:
 
@@ -146,9 +149,9 @@ def register_pricing_tools(mcp):
     async def get_azure_regional_pricing(
         cpu: int,
         memory: int,
-        services: list[dict],
+        services: list,
         limit: int = 10,
-        region: str | None = None
+        region: str = None
     ) -> dict:
 
         try:
@@ -184,9 +187,9 @@ def register_pricing_tools(mcp):
     async def get_gcp_regional_pricing(
         cpu: int,
         memory: int,
-        services: list[dict],
+        services: list,
         limit: int = 10,
-        region: str | None = None
+        region: str = None
     ) -> dict:
 
         try:
@@ -213,3 +216,63 @@ def register_pricing_tools(mcp):
                 "provider": "GCP",
                 "error": str(ex)
             }
+
+    @mcp.tool()
+    async def get_aws_regional_pricing(
+        cpu: int,
+        memory: int,
+        services: list,
+        limit: int = 10,
+        region: str = None
+    ) -> dict:
+
+        try:
+
+            result = await pricing_cache.get_or_set(
+                "aws:regional_pricing",
+                {
+                    "cpu": cpu,
+                    "memory": memory,
+                    "services": services,
+                    "limit": limit,
+                    "region": region
+                },
+                lambda: _get_aws_regional_pricing(
+                    cpu,
+                    memory,
+                    services,
+                    limit,
+                    region
+                )
+            )
+
+            print("AWS Regional Pricing Result:")
+            print(result)
+
+            return result
+
+        except Exception as ex:
+
+            print("AWS Regional Pricing Error:")
+            print(ex)
+
+            return {
+                "provider": "AWS",
+                "error": str(ex)
+            }
+
+
+async def _get_aws_regional_pricing(
+    cpu: int,
+    memory: int,
+    services: list[dict],
+    limit: int,
+    region: str | None
+) -> dict:
+    return aws_client.regional_pricing(
+        cpu=cpu,
+        memory=memory,
+        services=services,
+        limit=limit,
+        region=region
+    )

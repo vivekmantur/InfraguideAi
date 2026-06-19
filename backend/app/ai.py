@@ -28,6 +28,30 @@ AWS_PRICING_REGIONS = [
 ]
 
 
+REQUIREMENT_INTERPRETATION_RULES = """
+Requirement interpretation rules:
+- Migration Goal controls the target posture:
+  - Cost Optimization: prefer rightsizing, serverless/minimum viable managed tiers, budget controls, and cost review steps.
+  - Application Modernization: prefer managed runtimes, CI/CD, container/serverless preparation, observability, and refactoring opportunities.
+  - Lift-and-Shift: prefer minimal architecture change, VM/app-runtime migration, compatibility validation, and rollback-first execution.
+  - Scalability: prefer autoscaling, load balancing/API gateway, peak-load tests, capacity limits, and runbooks.
+  - Performance Improvement: prefer larger runtime/database capacity, profiling, performance dashboards, tuning, and latency validation.
+- Expected Traffic controls capacity and validation:
+  - Low: minimal baseline, smaller runtime assumptions, scale-up triggers, limited HA.
+  - Medium: standard production baseline, moderate load testing, normal autoscaling and observability.
+  - High: larger capacity, autoscaling, edge protection, peak/soak testing, stronger rollback thresholds.
+- Budget Preference controls cost posture:
+  - Low Cost: cost controls, smaller viable tiers, region comparison, budget alerts, scheduled rightsizing.
+  - Balanced: reliable production defaults with cost/performance tradeoff.
+  - Performance Focused: higher-capacity tiers, stronger monitoring, performance validation, less aggressive cost minimization.
+- Migration Timeline controls delivery depth and risk:
+  - Immediate: reduce scope, avoid optional modernization, require rollback-first cutover and higher risk.
+  - 3 Months: phased migration with standard validation and one rehearsal.
+  - 6 Months: staged pilot, deeper security review, load testing, cost tuning, runbook handover.
+  - Flexible: modernization-first plan, broader hardening, deeper refactor/optimization options.
+"""
+
+
 def groq_model() -> str:
     return DEFAULT_MODEL
 
@@ -190,7 +214,8 @@ def generate_architect_reasoning(
     services: list[dict[str, str]],
     cost: dict[str, Any],
     roadmap: list[str],
-    strategy: MigrationStrategyResult
+    strategy: MigrationStrategyResult,
+    requirements_profile: dict[str, Any] | None = None
 ) -> str:
     fallback = _fallback_reasoning(analysis, provider)
     if not is_groq_configured():
@@ -223,6 +248,11 @@ Recommended Migration Strategy:
 - Strategy: {strategy.strategy}
 - Confidence: {strategy.confidence}
 
+Derived planning profile:
+{json.dumps(requirements_profile or {}, indent=2)}
+
+{REQUIREMENT_INTERPRETATION_RULES}
+
 Evidence:
 {chr(10).join(f"- {r}" for r in strategy.reasons)}
 
@@ -238,6 +268,7 @@ Explain:
 - How the repository architecture influenced the recommendation.
 - What business value the organization will gain.
 - Key migration risks and considerations.
+- How the selected traffic, budget, goal, and timeline changed the recommendation.
 
 Requirements:
 - Write in complete sentences and paragraphs.
@@ -246,6 +277,8 @@ Requirements:
 - Do not repeat the evidence list verbatim.
 - Do not suggest a different migration strategy.
 - Do not contradict the selected migration strategy.
+- Align sizing, risk, service posture, and roadmap explanation with the derived planning profile.
+- Be concrete about real-world impact; avoid generic language that would apply equally to different selected fields.
 - Write like a senior cloud architect preparing an executive migration assessment.
 """
     return _chat(
@@ -264,6 +297,7 @@ def generate_service_recommendations(
     provider: str,
     strategy: MigrationStrategyResult,
     fallback_services: list[ServiceRecommendation],
+    requirements_profile: dict[str, Any] | None = None,
 ) -> tuple[list[ServiceRecommendation], list[str]]:
     warnings: list[str] = []
 
@@ -288,6 +322,7 @@ def generate_service_recommendations(
         "infrastructure_configs": analysis.infrastructure_configs,
         "cicd_configs": analysis.cicd_configs,
         "cloud_sizing": analysis.cloud_sizing.model_dump() if analysis.cloud_sizing else None,
+        "derived_planning_profile": requirements_profile or {},
     }
 
     prompt = f"""
@@ -313,6 +348,11 @@ Selected provider: {provider}
 Recommended migration strategy:
 {json.dumps(strategy.model_dump(), indent=2)}
 
+Derived planning profile:
+{json.dumps(requirements_profile or {}, indent=2)}
+
+{REQUIREMENT_INTERPRETATION_RULES}
+
 Return strict JSON only in this shape:
 {{
   "recommended_services": [
@@ -329,6 +369,12 @@ Rules:
 - Include Database only when repository facts show a database dependency.
 - Include File Storage only when useful for application assets, uploads, static files, or cloud storage migration.
 - Add optional services such as API Gateway, CDN/WAF, Cache, Queue, Event Streaming, Container Registry, CI/CD, or Data Integration only when justified by detected facts or migration requirements.
+- Use the derived planning profile to decide when to add autoscaling, edge protection, performance monitoring, cost controls, or reduced-scope runtime choices.
+- Low traffic and low cost should prefer minimal/serverless/low-cost services when technically reasonable.
+- High traffic, scalability, or performance-focused inputs should include capacity, autoscaling, edge protection, or performance monitoring services where relevant.
+- Immediate timeline should avoid unnecessary modernization services unless required by the detected architecture.
+- Services must visibly differ when the same repository is assessed with meaningfully different goal, traffic, budget, or timeline values.
+- Do not add a premium/performance service for Low Cost unless it is required by the detected architecture.
 - If repository facts show Azure Data Factory, ADF, ETL, or data pipeline dependencies, include a Data Integration service such as Azure Data Factory, AWS Glue, or Cloud Data Fusion for the selected provider.
 - Use concrete {provider} service names.
 - Keep component names short and stable.
@@ -404,6 +450,7 @@ def generate_migration_guidance(
     fallback_governance: GovernanceAssessment,
     fallback_opportunities: list[str],
     fallback_roadmap: list[str],
+    requirements_profile: dict[str, Any] | None = None,
 ) -> tuple[GovernanceAssessment, list[str], list[str], list[str]]:
     warnings: list[str] = []
     security_signals = {
@@ -437,6 +484,7 @@ def generate_migration_guidance(
         "network_requirements": analysis.network_requirements,
         "dependency_graph": analysis.dependency_graph,
         "cloud_sizing": analysis.cloud_sizing.model_dump() if analysis.cloud_sizing else None,
+        "derived_planning_profile": requirements_profile or {},
     }
 
     if not is_groq_configured():
@@ -468,6 +516,11 @@ Recommended migration strategy:
 Recommended services:
 {json.dumps(services, indent=2)}
 
+Derived planning profile:
+{json.dumps(requirements_profile or {}, indent=2)}
+
+{REQUIREMENT_INTERPRETATION_RULES}
+
 Security evidence signals:
 {json.dumps(security_signals, indent=2)}
 
@@ -489,6 +542,14 @@ Return strict JSON only in this shape:
 
 Rules:
 - Make the output specific to the detected stack, selected provider, strategy, and user requirements.
+- Use the derived planning profile as the source of truth for sizing, traffic posture, budget posture, delivery timeline, and risk posture.
+- Make Low, Medium, and High traffic produce visibly different validation and capacity planning steps.
+- Make Immediate, 3 Months, 6 Months, and Flexible timelines produce visibly different sequencing, governance, and validation depth.
+- Make Low Cost, Balanced, and Performance Focused budgets produce visibly different modernization and governance recommendations.
+- When the same repository is assessed with different selected fields, roadmap and governance must show realistic differences caused by those fields.
+- Timeline should not invent different runtime costs, but it should change delivery sequencing, review depth, cutover risk, and validation scope.
+- Budget should change cost-control and tier-selection guidance.
+- Traffic should change scaling, observability, and testing guidance.
 - Keep each list item concise and action-oriented.
 - Include 3-7 modernization opportunities.
 - Include 10-14 detailed roadmap steps in execution order.

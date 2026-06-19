@@ -398,13 +398,23 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
 
     package_names = _package_json_dependencies(evidence_by_path)
     python_packages = _python_dependencies(evidence_by_path)
+    has_django_project = (
+        "django" in python_packages
+        or "from django" in evidence_text
+        or "import django" in evidence_text
+        or "django.contrib" in evidence_text
+        or "manage.py" in names
+        or any(path.endswith("/settings.py") for path in paths)
+        or any(path.endswith("/urls.py") and "/django/" in path.lower() for path in paths)
+        or any(path.endswith("/wsgi.py") or path.endswith("/asgi.py") for path in paths)
+    )
 
     _append_if(frameworks, "react" in package_names or any(path.endswith(".tsx") for path in paths), "React")
     _append_if(frameworks, "vite" in package_names or "vite.config.ts" in names or "vite.config.js" in names, "Vite")
     _append_if(frameworks, "next" in package_names or "next.config.js" in names or "next.config.ts" in names, "Next.js")
     _append_if(frameworks, "fastapi" in python_packages or "from fastapi" in evidence_text or "import fastapi" in evidence_text, "FastAPI")
     _append_if(frameworks, "flask" in python_packages or "from flask" in evidence_text, "Flask")
-    _append_if(frameworks, "django" in python_packages or "django" in python_packages, "Django")
+    _append_if(frameworks, has_django_project, "Django")
     _append_if(frameworks, "express" in package_names, "Express")
     _append_if(frameworks, "spring-boot" in evidence_text or "springframework" in evidence_text, "Spring Boot")
     _append_if(frameworks, "azure-functions" in python_packages or "function.json" in names or "host.json" in names, "Azure Functions")
@@ -582,6 +592,10 @@ def _dedupe(items: list[str]) -> list[str]:
 def _architecture_pattern(frameworks: list[str], databases: list[str]) -> str:
     if "Azure Functions" in frameworks:
         return "Serverless event-driven application"
+    if "Django" in frameworks and databases:
+        return "Stateful Django web application"
+    if "Django" in frameworks:
+        return "Django web application"
     if any(item in frameworks for item in ["React", "Next.js"]) and any(item in frameworks for item in ["FastAPI", "Flask", "Django", "Express", "Spring Boot"]):
         return "Full-stack web application"
     if databases:

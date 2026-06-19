@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
 from typing import Any
@@ -98,6 +96,7 @@ def register_cloud_intelligence_tools(mcp):
                 "get_gcp_compute_pricing",
                 "get_azure_regional_pricing",
                 "get_gcp_regional_pricing",
+                "get_aws_regional_pricing",
                 "check_service_availability",
                 "check_runtime_support",
                 "get_service_limits",
@@ -108,7 +107,7 @@ def register_cloud_intelligence_tools(mcp):
     async def check_service_availability(
         provider: str,
         region: str,
-        services: list[dict],
+        services: list,
     ) -> dict:
         normalized_provider = _provider_name(provider)
         catalogs = _catalogs()
@@ -162,8 +161,8 @@ def register_cloud_intelligence_tools(mcp):
     async def check_runtime_support(
         provider: str,
         target_service: str,
-        runtimes: list[str],
-        frameworks: list[str] | None = None,
+        runtimes: list,
+        frameworks: list = None,
     ) -> dict:
         normalized_provider = _provider_name(provider)
         catalog = _catalogs().get(normalized_provider, {})

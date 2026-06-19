@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from uuid import uuid4
 from .ai import (
     generate_architect_reasoning,
@@ -9,7 +10,6 @@ from .migration_strategy import determine_migration_strategy, assess_strategy_al
 from app.services.mcp_client import (
     CloudMcpClient
 )
-from app.services.aws_pricing import AwsPricingClient
 from .models import (
     AssessmentRequest,
     AssessmentResponse,
@@ -22,6 +22,23 @@ from .models import (
     CloudSizingRequirements
 )
 from .storage import utc_now
+
+
+@dataclass(frozen=True)
+class RequirementsProfile:
+    cpu_cores: int
+    memory_gb: int
+    storage_gb: int
+    traffic_label: str
+    budget_label: str
+    goal_label: str
+    timeline_label: str
+    traffic_multiplier: float
+    budget_multiplier: float
+    risk_modifier: int
+    service_posture: str
+    timeline_posture: str
+    sizing_reason: str
 
 
 SERVICE_MAP = {
@@ -71,6 +88,10 @@ SERVICE_MAP = {
 
 
 async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest, analysis: RepositoryAnalysis, warnings: list[str]) -> AssessmentResponse:
+    requirements_profile = _requirements_profile(
+        request,
+        analysis
+    )
     strategy_result = determine_migration_strategy(
     request.requirements.migration_goal,
     analysis
@@ -82,24 +103,58 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
     provider = _select_provider(request, analysis)
     readiness = _readiness(analysis)
     print(f"analysis: {analysis},provider:{provider}")
-    fallback_services = _services(provider, analysis)
+    fallback_services = _services(
+        provider,
+        analysis,
+        request,
+        requirements_profile
+    )
     services, service_warnings = generate_service_recommendations(
         analysis,
         request.requirements,
         provider,
         strategy_result,
         fallback_services,
+        _requirements_profile_payload(requirements_profile),
     )
     warnings.extend(service_warnings)
+    services = _apply_requirement_service_adjustments(
+        provider,
+        analysis,
+        request,
+        requirements_profile,
+        services
+    )
     print(f"Recommended services for provider {services}")
     print(request.requirements.cloud_provider)
-    cost = await _cost_estimate(request, analysis, services)
+    cost = await _cost_estimate(
+        request,
+        analysis,
+        services,
+        requirements_profile
+    )
     print(f"Cost estimate for provider {provider}: {cost.monthly} INR/month with line items: {cost.line_items}")
-    fallback_opportunities = _modernization_opportunities(analysis, provider)
+    fallback_opportunities = _modernization_opportunities(
+        analysis,
+        provider,
+        request,
+        requirements_profile
+    )
     strategy = strategy_result.strategy
-    fallback_roadmap = _roadmap(strategy, analysis, provider)
+    fallback_roadmap = _roadmap(
+        strategy,
+        analysis,
+        provider,
+        request,
+        requirements_profile
+    )
     architecture_summary = _architecture_summary(analysis)
-    fallback_governance = _governance(analysis, provider)
+    fallback_governance = _governance(
+        analysis,
+        provider,
+        request,
+        requirements_profile
+    )
     governance, opportunities, roadmap, guidance_warnings = generate_migration_guidance(
         analysis,
         request.requirements,
@@ -109,15 +164,32 @@ async def build_assessment(request: AssessmentRequest | FolderAssessmentRequest,
         fallback_governance,
         fallback_opportunities,
         fallback_roadmap,
+        _requirements_profile_payload(requirements_profile),
     )
     warnings.extend(guidance_warnings)
+    opportunities = _apply_requirement_opportunities(
+        opportunities,
+        request,
+        requirements_profile
+    )
+    roadmap = _apply_requirement_roadmap(
+        roadmap,
+        request,
+        requirements_profile
+    )
+    governance = _apply_requirement_governance(
+        governance,
+        request,
+        requirements_profile
+    )
     ai_reasoning = generate_architect_reasoning(
         analysis,
         provider,
         [item.model_dump() for item in services],
         cost.model_dump(),
         roadmap,
-        strategy_result
+        strategy_result,
+        _requirements_profile_payload(requirements_profile),
     )
     cloud_sizing = cloud_sizing = (
         analysis.cloud_sizing
@@ -278,6 +350,150 @@ def _select_provider(request: AssessmentRequest | FolderAssessmentRequest, analy
     return "AWS"
 
 
+def _requirements_profile(
+    request: AssessmentRequest | FolderAssessmentRequest,
+    analysis: RepositoryAnalysis
+) -> RequirementsProfile:
+    detected = analysis.cloud_sizing
+    traffic = request.requirements.expected_traffic.value
+    budget = request.requirements.budget_preference.value
+    goal = request.requirements.migration_goal.value
+    timeline = request.requirements.migration_timeline.value
+
+    traffic_sizing = {
+        "Low": (1, 2, 0.85, "small workload baseline for low expected traffic"),
+        "Medium": (2, 4, 1.0, "standard production baseline for medium expected traffic"),
+        "High": (4, 8, 1.55, "scaled production baseline for high expected traffic"),
+    }
+    min_cpu, min_memory, traffic_multiplier, sizing_reason = traffic_sizing.get(
+        traffic,
+        traffic_sizing["Medium"]
+    )
+
+    budget_multipliers = {
+        "Low Cost": 0.85,
+        "Balanced": 1.0,
+        "Performance Focused": 1.35,
+    }
+    budget_multiplier = budget_multipliers.get(
+        budget,
+        1.0
+    )
+
+    if budget == "Performance Focused":
+        min_cpu = max(min_cpu, 4)
+        min_memory = max(min_memory, 8)
+        service_posture = "performance-focused"
+    elif budget == "Low Cost":
+        service_posture = "cost-optimized"
+    else:
+        service_posture = "balanced"
+
+    if goal in {"Scalability", "Performance Improvement"}:
+        min_cpu = max(min_cpu, 2)
+        min_memory = max(min_memory, 4)
+    if goal == "Performance Improvement":
+        min_cpu = max(min_cpu, 4)
+        min_memory = max(min_memory, 8)
+
+    timeline_posture = {
+        "Immediate": "compressed delivery with reduced change scope",
+        "3 Months": "phased delivery with standard validation",
+        "6 Months": "extended delivery with deeper testing and optimization",
+        "Flexible": "modernization-led delivery with broader hardening",
+    }.get(
+        timeline,
+        "phased delivery with standard validation"
+    )
+
+    risk_modifier = {
+        "Immediate": 1,
+        "3 Months": 0,
+        "6 Months": -1,
+        "Flexible": -1,
+    }.get(
+        timeline,
+        0
+    )
+
+    return RequirementsProfile(
+        cpu_cores=max(detected.cpu_cores, min_cpu) if detected else min_cpu,
+        memory_gb=max(detected.memory_gb, min_memory) if detected else min_memory,
+        storage_gb=max(detected.storage_gb, 25 if traffic == "Low" else 50 if traffic == "Medium" else 100) if detected else 25 if traffic == "Low" else 50 if traffic == "Medium" else 100,
+        traffic_label=traffic,
+        budget_label=budget,
+        goal_label=goal,
+        timeline_label=timeline,
+        traffic_multiplier=traffic_multiplier,
+        budget_multiplier=budget_multiplier,
+        risk_modifier=risk_modifier,
+        service_posture=service_posture,
+        timeline_posture=timeline_posture,
+        sizing_reason=sizing_reason,
+    )
+
+
+def _requirements_profile_payload(
+    profile: RequirementsProfile
+) -> dict:
+    return {
+        "cpu_cores": profile.cpu_cores,
+        "memory_gb": profile.memory_gb,
+        "storage_gb": profile.storage_gb,
+        "traffic_label": profile.traffic_label,
+        "budget_label": profile.budget_label,
+        "goal_label": profile.goal_label,
+        "timeline_label": profile.timeline_label,
+        "traffic_multiplier": profile.traffic_multiplier,
+        "budget_multiplier": profile.budget_multiplier,
+        "service_posture": profile.service_posture,
+        "timeline_posture": profile.timeline_posture,
+        "sizing_reason": profile.sizing_reason,
+    }
+
+
+def _pricing_adjustment_lines(
+    profile: RequirementsProfile
+) -> list[str]:
+    lines: list[str] = []
+
+    if profile.traffic_multiplier != 1:
+        lines.append(
+            (
+                f"Traffic adjustment: {profile.traffic_label} traffic "
+                f"{_multiplier_effect(profile.traffic_multiplier)} "
+                f"({profile.sizing_reason})."
+            )
+        )
+
+    if profile.budget_multiplier != 1:
+        lines.append(
+            (
+                f"Budget adjustment: {profile.budget_label} "
+                f"{_multiplier_effect(profile.budget_multiplier)} "
+                f"({profile.service_posture})."
+            )
+        )
+
+    return lines
+
+
+def _multiplier_effect(
+    multiplier: float
+) -> str:
+    percentage = round(
+        abs(
+            1 - multiplier
+        )
+        * 100
+    )
+
+    if multiplier < 1:
+        return f"reduces estimate by {percentage}%"
+
+    return f"increases estimate by {percentage}%"
+
+
 def _readiness(analysis: RepositoryAnalysis) -> ReadinessAssessment:
     score = 40
     findings: list[str] = []
@@ -352,9 +568,28 @@ def _readiness(analysis: RepositoryAnalysis) -> ReadinessAssessment:
     )
 
 
-def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecommendation]:
+def _services(
+    provider: str,
+    analysis: RepositoryAnalysis,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> list[ServiceRecommendation]:
     cloud = SERVICE_MAP[provider]
-    runtime_recommendation = cloud["function"] if "Azure Functions" in analysis.frameworks else cloud["container"]
+    if request.requirements.migration_goal.value == "Lift-and-Shift":
+        runtime_recommendation = (
+            "Amazon EC2"
+            if provider == "AWS"
+            else "Azure Virtual Machines"
+            if provider == "Azure"
+            else "Compute Engine"
+        )
+    elif (
+        request.requirements.migration_goal.value == "Cost Optimization"
+        and request.requirements.expected_traffic.value == "Low"
+    ):
+        runtime_recommendation = cloud["function"]
+    else:
+        runtime_recommendation = cloud["function"] if "Azure Functions" in analysis.frameworks else cloud["container"]
     current_runtime = analysis.deployment_model if analysis.deployment_model != "Unknown" else _join(analysis.frameworks or analysis.runtimes)
     storage_signals = [item for item in analysis.cloud_dependencies if "Storage" in item]
     services = [
@@ -388,9 +623,17 @@ def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecomm
         services.append(
             ServiceRecommendation(component="API Gateway", current="HTTP application endpoint", recommended=cloud["api_gateway"])
         )
-    if request_public_edge(analysis):
+    if request_public_edge(analysis) or request.requirements.expected_traffic.value == "High":
         services.append(
             ServiceRecommendation(component="Edge Security", current="Public web traffic", recommended=cloud["cdn_waf"])
+        )
+    if request.requirements.expected_traffic.value == "High" or request.requirements.migration_goal.value in {"Scalability", "Performance Improvement"}:
+        services.append(
+            ServiceRecommendation(component="Autoscaling", current="Manual or not detected", recommended=f"{runtime_recommendation} autoscaling policy")
+        )
+    if request.requirements.budget_preference.value == "Performance Focused":
+        services.append(
+            ServiceRecommendation(component="Performance Monitoring", current="Basic application logs", recommended=f"{cloud['monitoring']} performance dashboards and alert rules")
         )
     return services
 
@@ -424,13 +667,92 @@ def request_public_edge(analysis: RepositoryAnalysis) -> bool:
     )
 
 
+def _apply_requirement_service_adjustments(
+    provider: str,
+    analysis: RepositoryAnalysis,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile,
+    services: list[ServiceRecommendation]
+) -> list[ServiceRecommendation]:
+    adjusted = list(services)
+    components = {
+        service.component.lower()
+        for service in adjusted
+    }
+    cloud = SERVICE_MAP[provider]
+
+    if (
+        request.requirements.expected_traffic.value == "High"
+        or request.requirements.migration_goal.value in {"Scalability", "Performance Improvement"}
+    ) and "autoscaling" not in components:
+        runtime = next(
+            (
+                service.recommended
+                for service in adjusted
+                if service.component.lower() == "application runtime"
+            ),
+            cloud["container"]
+        )
+        adjusted.append(
+            ServiceRecommendation(
+                component="Autoscaling",
+                current="Manual or not detected",
+                recommended=f"{runtime} autoscaling policy"
+            )
+        )
+
+    if (
+        request.requirements.expected_traffic.value == "High"
+        and "edge security" not in components
+        and ("HTTP" in analysis.triggers or analysis.application_type == "Web Application")
+    ):
+        adjusted.append(
+            ServiceRecommendation(
+                component="Edge Security",
+                current="Public web traffic",
+                recommended=cloud["cdn_waf"]
+            )
+        )
+
+    if (
+        request.requirements.budget_preference.value == "Performance Focused"
+        and "performance monitoring" not in components
+    ):
+        adjusted.append(
+            ServiceRecommendation(
+                component="Performance Monitoring",
+                current="Basic application logs",
+                recommended=f"{cloud['monitoring']} performance dashboards and alert rules"
+            )
+        )
+
+    if (
+        request.requirements.migration_goal.value == "Cost Optimization"
+        and "cost controls" not in components
+    ):
+        adjusted.append(
+            ServiceRecommendation(
+                component="Cost Controls",
+                current="Not detected",
+                recommended=f"{provider} budgets, tagging, and rightsizing recommendations"
+            )
+        )
+
+    return _dedupe_services(adjusted)[:10]
+
+
 async def _cost_estimate(
     request: AssessmentRequest | FolderAssessmentRequest,
     analysis: RepositoryAnalysis,
-    services: list[ServiceRecommendation] | None = None
+    services: list[ServiceRecommendation] | None = None,
+    profile: RequirementsProfile | None = None
 ) -> CostEstimate:
 
     provider = _select_provider(
+        request,
+        analysis
+    )
+    profile = profile or _requirements_profile(
         request,
         analysis
     )
@@ -443,10 +765,11 @@ async def _cost_estimate(
 
     if provider in {"GCP", "Azure"}:
 
-        cloud_sizing = (
-            analysis.cloud_sizing
-            if analysis.cloud_sizing
-            else CloudSizingRequirements()
+        cloud_sizing = CloudSizingRequirements(
+            cpu_cores=profile.cpu_cores,
+            memory_gb=profile.memory_gb,
+            storage_gb=profile.storage_gb,
+            confidence="Medium",
         )
 
         if not analysis.cloud_sizing:
@@ -567,7 +890,7 @@ async def _cost_estimate(
                         )
                         print(service_pricing)
 
-                total_monthly = monthly + additional_monthly
+                total_monthly = (monthly + additional_monthly) * profile.traffic_multiplier * profile.budget_multiplier
 
                 lower = int(total_monthly * 0.9)
                 upper = int(total_monthly * 1.1)
@@ -593,7 +916,9 @@ async def _cost_estimate(
                         (
                             "Pricing retrieved from "
                             "Google Cloud Billing API"
-                        )
+                        ),
+                        f"Traffic profile adjustment: {profile.traffic_label} ({profile.sizing_reason})",
+                        f"Budget posture: {profile.budget_label} ({profile.service_posture})",
                     ] + additional_line_items,
                     assumptions=[
                         (
@@ -602,6 +927,8 @@ async def _cost_estimate(
                         ),
                         f"CPU requirement: {cpu}",
                         f"Memory requirement: {memory}",
+                        f"Migration goal: {profile.goal_label}",
+                        f"Migration timeline: {profile.timeline_label} ({profile.timeline_posture})",
                         (
                             "Cost calculated using "
                             "Google Cloud Billing API"
@@ -731,7 +1058,7 @@ async def _cost_estimate(
                         )
                         print(service_pricing)
 
-                total_monthly = monthly + additional_monthly
+                total_monthly = (monthly + additional_monthly) * profile.traffic_multiplier * profile.budget_multiplier
 
                 lower = int(total_monthly * 0.9)
                 upper = int(total_monthly * 1.1)
@@ -757,7 +1084,9 @@ async def _cost_estimate(
                         (
                             "Pricing retrieved from "
                             "Azure Retail Pricing API"
-                        )
+                        ),
+                        f"Traffic profile adjustment: {profile.traffic_label} ({profile.sizing_reason})",
+                        f"Budget posture: {profile.budget_label} ({profile.service_posture})",
                     ] + additional_line_items,
                     assumptions=[
                         (
@@ -770,6 +1099,8 @@ async def _cost_estimate(
                         ),
                         f"CPU requirement: {cpu}",
                         f"Memory requirement: {memory}",
+                        f"Migration goal: {profile.goal_label}",
+                        f"Migration timeline: {profile.timeline_label} ({profile.timeline_posture})",
                         (
                             "Cost calculated using "
                             "Azure Retail Pricing API"
@@ -796,14 +1127,16 @@ async def _cost_estimate(
 
     if provider == "AWS":
 
-        cloud_sizing = (
-            analysis.cloud_sizing
-            if analysis.cloud_sizing
-            else CloudSizingRequirements()
+        cloud_sizing = CloudSizingRequirements(
+            cpu_cores=profile.cpu_cores,
+            memory_gb=profile.memory_gb,
+            storage_gb=profile.storage_gb,
+            confidence="Medium",
         )
 
         try:
-            pricing_data = AwsPricingClient().regional_pricing(
+            mcp_client = CloudMcpClient()
+            pricing_data = await mcp_client.get_aws_regional_pricing(
                 cpu=cloud_sizing.cpu_cores,
                 memory=cloud_sizing.memory_gb,
                 services=[
@@ -873,6 +1206,8 @@ async def _cost_estimate(
                             0
                             )
                         )
+                        * profile.traffic_multiplier
+                        * profile.budget_multiplier
                     )
                 )
                 annual = int(
@@ -881,11 +1216,15 @@ async def _cost_estimate(
                 lower = int(
                     round(
                         min(totals)
+                        * profile.traffic_multiplier
+                        * profile.budget_multiplier
                     )
                 )
                 upper = int(
                     round(
                         max(totals)
+                        * profile.traffic_multiplier
+                        * profile.budget_multiplier
                     )
                 )
                 runtime_sku = primary_region.get(
@@ -924,6 +1263,11 @@ async def _cost_estimate(
                     )
                     for service in service_breakdown
                 ]
+                line_items.extend(
+                    _pricing_adjustment_lines(
+                        profile
+                    )
+                )
                 raw_assumptions = pricing_data.get(
                     "assumptions",
                     []
@@ -945,6 +1289,10 @@ async def _cost_estimate(
                         f"vCPU, {cloud_sizing.memory_gb} GB RAM, "
                         f"{cloud_sizing.storage_gb} GB storage."
                     ),
+                    f"Expected traffic profile: {profile.traffic_label} ({profile.sizing_reason}).",
+                    f"Budget posture: {profile.budget_label} ({profile.service_posture}).",
+                    f"Migration goal: {profile.goal_label}.",
+                    f"Migration timeline: {profile.timeline_label} ({profile.timeline_posture}).",
                     (
                         "Runtime pricing retrieved from AWS Price List API. "
                         "Managed service rows use AWS Pricing API where practical "
@@ -1066,6 +1414,10 @@ async def _cost_estimate(
                 f"Expected traffic profile: "
                 f"{request.requirements.expected_traffic.value}"
             ),
+            f"Migration goal: {profile.goal_label}",
+            f"Budget posture: {profile.budget_label} ({profile.service_posture})",
+            f"Migration timeline: {profile.timeline_label} ({profile.timeline_posture})",
+            f"Sizing profile: {profile.cpu_cores} vCPU, {profile.memory_gb} GB RAM, {profile.storage_gb} GB storage",
             (
                 f"Hosting model detected: "
                 f"{analysis.hosting_model}"
@@ -1078,7 +1430,12 @@ async def _cost_estimate(
     )
     
 
-def _modernization_opportunities(analysis: RepositoryAnalysis, provider: str) -> list[str]:
+def _modernization_opportunities(
+    analysis: RepositoryAnalysis,
+    provider: str,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> list[str]:
     cloud = SERVICE_MAP[provider]
     stack = _join(
         analysis.frameworks
@@ -1151,6 +1508,14 @@ def _modernization_opportunities(analysis: RepositoryAnalysis, provider: str) ->
     if analysis.governance_findings:
         opportunities.append("Resolve governance findings before production cutover.")
 
+    opportunities.extend(
+        _requirement_opportunities(
+            request,
+            profile,
+            provider
+        )
+    )
+
     return _dedupe(opportunities)
 
 
@@ -1163,7 +1528,13 @@ def _strategy(request: AssessmentRequest | FolderAssessmentRequest, readiness: R
     return "Replatform"
 
 
-def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list[str]:
+def _roadmap(
+    strategy: str,
+    analysis: RepositoryAnalysis,
+    provider: str,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> list[str]:
     cloud = SERVICE_MAP[provider]
     stack = _join(
         analysis.frameworks
@@ -1182,9 +1553,9 @@ def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list
     )
     sizing = analysis.cloud_sizing
     sizing_text = (
-        f"{sizing.cpu_cores or 2} vCPU and {sizing.memory_gb or 4} GB RAM"
+        f"{profile.cpu_cores} vCPU and {profile.memory_gb} GB RAM"
         if sizing
-        else "the validated production sizing baseline"
+        else f"{profile.cpu_cores} vCPU and {profile.memory_gb} GB RAM requirement profile"
     )
 
     steps = [
@@ -1316,6 +1687,14 @@ def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list
         ]
     )
 
+    steps.extend(
+        _requirement_roadmap_steps(
+            request,
+            profile,
+            provider
+        )
+    )
+
     return _dedupe(steps)
 
 
@@ -1329,7 +1708,12 @@ def _architecture_summary(analysis: RepositoryAnalysis) -> str:
     return f"{analysis.architecture_pattern}. {readiness}. Detected stack includes {_join(analysis.frameworks or analysis.languages)}."
 
 
-def _governance(analysis: RepositoryAnalysis, provider: str) -> GovernanceAssessment:
+def _governance(
+    analysis: RepositoryAnalysis,
+    provider: str,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> GovernanceAssessment:
     issues = list(analysis.governance_findings)
     passed_checks: list[str] = []
     cloud = SERVICE_MAP[provider]
@@ -1411,6 +1795,22 @@ def _governance(analysis: RepositoryAnalysis, provider: str) -> GovernanceAssess
                 f"provisioning {provider} resources."
             )
         )
+    if request.requirements.migration_timeline.value == "Immediate":
+        issues.append(
+            "Immediate timeline increases migration risk because discovery, validation, and rollback rehearsal are compressed."
+        )
+    if request.requirements.expected_traffic.value == "High":
+        recommendations.append(
+            f"Define high-traffic alert thresholds, autoscaling guardrails, and capacity runbooks in {cloud['monitoring']} before cutover."
+        )
+    if request.requirements.budget_preference.value == "Low Cost":
+        recommendations.append(
+            f"Add budget alerts, mandatory tags, and rightsizing reviews for {provider} resources."
+        )
+    if request.requirements.migration_timeline.value in {"6 Months", "Flexible"}:
+        passed_checks.append(
+            "Selected timeline allows deeper validation, staged rollout, and rollback rehearsal before production cutover."
+        )
     if not analysis.container_configs and "Azure Functions" not in analysis.frameworks:
         issues.append(
             (
@@ -1444,6 +1844,11 @@ def _governance(analysis: RepositoryAnalysis, provider: str) -> GovernanceAssess
     else:
         risk = "Low"
 
+    risk = _adjust_risk(
+        risk,
+        profile.risk_modifier
+    )
+
     recommendation = (
         "Block production migration until high-risk findings are remediated."
         if risk == "High"
@@ -1458,6 +1863,203 @@ def _governance(analysis: RepositoryAnalysis, provider: str) -> GovernanceAssess
         recommendations=recommendations,
         recommendation=recommendation,
     )
+
+
+def _requirement_opportunities(
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile,
+    provider: str
+) -> list[str]:
+    items: list[str] = [
+        (
+            f"Apply a {profile.service_posture} target architecture for "
+            f"{profile.goal_label.lower()} using {profile.cpu_cores} vCPU, "
+            f"{profile.memory_gb} GB RAM, and {profile.storage_gb} GB storage as the planning baseline."
+        )
+    ]
+
+    if request.requirements.migration_goal.value == "Cost Optimization":
+        items.append(
+            f"Introduce {provider} budget alerts, resource tags, rightsizing reviews, and scheduled cleanup for non-production resources."
+        )
+    if request.requirements.migration_goal.value == "Scalability":
+        items.append(
+            "Define autoscaling thresholds, load test targets, and peak traffic runbooks before production migration."
+        )
+    if request.requirements.migration_goal.value == "Performance Improvement":
+        items.append(
+            "Add performance baselines, latency budgets, profiling, and database/query tuning checkpoints."
+        )
+    if request.requirements.expected_traffic.value == "High":
+        items.append(
+            "Plan CDN/WAF, autoscaling, and higher observability retention for high expected traffic."
+        )
+    if request.requirements.budget_preference.value == "Low Cost":
+        items.append(
+            "Prefer serverless or smaller managed tiers first, then scale after measured utilization justifies it."
+        )
+    if request.requirements.budget_preference.value == "Performance Focused":
+        items.append(
+            "Prefer performance-oriented runtime and database tiers with stricter monitoring and alerting."
+        )
+
+    return items
+
+
+def _requirement_roadmap_steps(
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile,
+    provider: str
+) -> list[str]:
+    steps = [
+        (
+            f"Requirement profile validation: confirm {profile.traffic_label} traffic assumptions, "
+            f"{profile.budget_label} budget posture, {profile.goal_label.lower()} objective, "
+            f"and {profile.timeline_label} delivery window with application owners."
+        ),
+        (
+            f"Planning impact: use {profile.cpu_cores} vCPU, {profile.memory_gb} GB RAM, "
+            f"{profile.storage_gb} GB storage, {profile.service_posture} service posture, "
+            f"and {profile.timeline_posture}."
+        )
+    ]
+
+    if request.requirements.expected_traffic.value == "Low":
+        steps.append(
+            "Capacity validation: start with minimal production capacity and define scale-up triggers based on CPU, memory, request volume, and error rate."
+        )
+    elif request.requirements.expected_traffic.value == "Medium":
+        steps.append(
+            "Capacity validation: run moderate load testing, configure autoscaling minimums, and validate log/metric retention for normal production traffic."
+        )
+    else:
+        steps.append(
+            "Capacity validation: run peak-load and soak tests, configure autoscaling limits, CDN/WAF rules, and high-traffic rollback thresholds."
+        )
+
+    if request.requirements.migration_timeline.value == "Immediate":
+        steps.append(
+            "Timeline control: reduce scope to the safest migration path, freeze optional refactoring, and require a documented rollback checkpoint."
+        )
+    elif request.requirements.migration_timeline.value in {"6 Months", "Flexible"}:
+        steps.append(
+            "Timeline control: include staged pilots, security review, performance tuning, cost review, and operational handover before cutover."
+        )
+
+    if request.requirements.budget_preference.value == "Low Cost":
+        steps.append(
+            f"Cost control: enable {provider} budgets, tagging, low-cost region comparison, and post-migration rightsizing review."
+        )
+    elif request.requirements.budget_preference.value == "Performance Focused":
+        steps.append(
+            "Performance control: validate higher-capacity runtime, database performance, and observability dashboards before production traffic shift."
+        )
+
+    return steps
+
+
+def _apply_requirement_opportunities(
+    opportunities: list[str],
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> list[str]:
+    provider = request.requirements.cloud_provider.value
+    if provider == "No Preference":
+        provider = "the selected cloud provider"
+    return _dedupe(
+        [
+            *opportunities,
+            *_requirement_opportunities(
+                request,
+                profile,
+                provider
+            )
+        ]
+    )
+
+
+def _apply_requirement_roadmap(
+    roadmap: list[str],
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> list[str]:
+    provider = request.requirements.cloud_provider.value
+    if provider == "No Preference":
+        provider = "the selected cloud provider"
+    return _dedupe(
+        [
+            *roadmap,
+            *_requirement_roadmap_steps(
+                request,
+                profile,
+                provider
+            )
+        ]
+    )
+
+
+def _apply_requirement_governance(
+    governance: GovernanceAssessment,
+    request: AssessmentRequest | FolderAssessmentRequest,
+    profile: RequirementsProfile
+) -> GovernanceAssessment:
+    recommendations = list(governance.recommendations)
+    issues = list(governance.issues)
+    passed_checks = list(governance.passed_checks)
+
+    if request.requirements.migration_timeline.value == "Immediate":
+        issues.append(
+            "Immediate timeline requires explicit rollback approval and reduced migration scope."
+        )
+    if request.requirements.expected_traffic.value == "High":
+        recommendations.append(
+            "High expected traffic requires autoscaling, alerting, and load-test evidence before approval."
+        )
+    if request.requirements.budget_preference.value == "Low Cost":
+        recommendations.append(
+            "Low-cost posture requires budget alerts, resource tags, and scheduled rightsizing reviews."
+        )
+    if request.requirements.migration_timeline.value in {"6 Months", "Flexible"}:
+        passed_checks.append(
+            "Selected timeline supports staged validation and governance checkpoints."
+        )
+
+    risk = _adjust_risk(
+        governance.risk_level,
+        profile.risk_modifier
+    )
+    recommendation = (
+        "Block production migration until high-risk findings are remediated."
+        if risk == "High"
+        else "Address governance gaps during migration planning."
+        if risk == "Medium"
+        else "Proceed with standard security validation and approval gates."
+    )
+
+    return GovernanceAssessment(
+        risk_level=risk,
+        issues=sorted(set(issues)),
+        passed_checks=sorted(set(passed_checks)),
+        recommendations=_dedupe(recommendations),
+        recommendation=recommendation,
+    )
+
+
+def _adjust_risk(
+    risk: str,
+    modifier: int
+) -> str:
+    levels = ["Low", "Medium", "High"]
+    index = levels.index(risk) if risk in levels else 1
+    return levels[
+        max(
+            0,
+            min(
+                len(levels) - 1,
+                index + modifier
+            )
+        )
+    ]
 
 
 def _user_visible_warnings(warnings: list[str]) -> list[str]:
@@ -1488,6 +2090,22 @@ def _dedupe(items: list[str]) -> list[str]:
             continue
         deduped.append(item)
         seen.add(item)
+
+    return deduped
+
+
+def _dedupe_services(
+    services: list[ServiceRecommendation]
+) -> list[ServiceRecommendation]:
+    deduped: list[ServiceRecommendation] = []
+    seen: set[str] = set()
+
+    for service in services:
+        key = service.component.strip().lower()
+        if key in seen:
+            continue
+        deduped.append(service)
+        seen.add(key)
 
     return deduped
 
