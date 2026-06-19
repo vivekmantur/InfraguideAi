@@ -328,7 +328,8 @@ Rules:
 - Always include Application Runtime, Secrets, and Monitoring.
 - Include Database only when repository facts show a database dependency.
 - Include File Storage only when useful for application assets, uploads, static files, or cloud storage migration.
-- Add optional services such as API Gateway, CDN/WAF, Cache, Queue, Container Registry, or CI/CD only when justified by detected facts or migration requirements.
+- Add optional services such as API Gateway, CDN/WAF, Cache, Queue, Event Streaming, Container Registry, CI/CD, or Data Integration only when justified by detected facts or migration requirements.
+- If repository facts show Azure Data Factory, ADF, ETL, or data pipeline dependencies, include a Data Integration service such as Azure Data Factory, AWS Glue, or Cloud Data Fusion for the selected provider.
 - Use concrete {provider} service names.
 - Keep component names short and stable.
 - Keep current state factual, using "Not detected" when evidence is absent.
@@ -430,6 +431,10 @@ def generate_migration_guidance(
         "container_configs": analysis.container_configs,
         "infrastructure_configs": analysis.infrastructure_configs,
         "cicd_configs": analysis.cicd_configs,
+        "external_dependencies": analysis.external_dependencies,
+        "cloud_dependencies": analysis.cloud_dependencies,
+        "storage_dependencies": analysis.storage_dependencies,
+        "network_requirements": analysis.network_requirements,
         "dependency_graph": analysis.dependency_graph,
         "cloud_sizing": analysis.cloud_sizing.model_dump() if analysis.cloud_sizing else None,
     }
@@ -486,7 +491,9 @@ Rules:
 - Make the output specific to the detected stack, selected provider, strategy, and user requirements.
 - Keep each list item concise and action-oriented.
 - Include 3-7 modernization opportunities.
-- Include 5-8 roadmap steps in execution order.
+- Include 10-14 detailed roadmap steps in execution order.
+- Roadmap must cover the full application migration lifecycle: discovery, dependency inventory, target architecture, landing zone/IAM/networking, runtime or container preparation, database/data migration, configuration and secrets, cloud service integration, CI/CD and infrastructure automation, testing, cutover and rollback, observability, and post-migration optimization.
+- Each roadmap item should name the detected application stack or dependency where relevant.
 - Generate fresh security, modernization, and roadmap language from the evidence signals.
 - Keep factual findings grounded in repository facts. If something is absent, phrase it as not detected.
 - Do not claim a vulnerability exists unless it appears in governance_findings_from_repository.
@@ -506,7 +513,7 @@ Rules:
         ],
         fallback="{}",
         temperature=0.35,
-        max_tokens=1800,
+        max_tokens=2600,
         response_format={"type": "json_object"},
         label="migration-guidance",
     )

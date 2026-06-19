@@ -226,7 +226,24 @@ def _safe_clone_error(message: str, github_token: str | None) -> str:
     if token:
         message = message.replace(token, "<redacted-token>")
         message = re.sub(r"x-access-token:[^@\\s]+@", "x-access-token:<redacted-token>@", message)
-    return message
+
+    normalized = message.lower()
+    if "filename too long" in normalized or "unable to checkout working tree" in normalized:
+        return (
+            "repository contains file paths that are too long for Windows checkout. "
+            "Enable long paths in Windows/Git or upload a cleaned source folder without build output directories."
+        )
+    if "authentication failed" in normalized or "could not read username" in normalized:
+        return "repository authentication failed. Provide a GitHub access token with read access and try again."
+    if "repository not found" in normalized:
+        return "repository was not found. Check the owner, repository name, and access permissions."
+    if "timed out" in normalized or "timeout" in normalized:
+        return "repository clone timed out. Try again or upload the project folder directly."
+
+    compact = " ".join(message.split())
+    if len(compact) > 240:
+        return f"{compact[:237]}..."
+    return compact
 
 
 def analyze_local_repository(root: Path, source_name: str, migration_requirements: MigrationRequirements
@@ -362,6 +379,8 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
     containers: list[str] = []
     infrastructure: list[str] = []
     cicd: list[str] = []
+    cloud_dependencies: list[str] = []
+    external_dependencies: list[str] = []
 
     _append_if(languages, ".py" in suffixes, "Python")
     _append_if(languages, bool({".js", ".jsx"} & suffixes), "JavaScript")
@@ -444,6 +463,43 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
     _append_if(cicd, any(".github/workflows/" in path.lower() for path in paths), "GitHub Actions")
     _append_if(cicd, "azure-pipelines.yml" in names, "Azure Pipelines")
     _append_if(cicd, ".gitlab-ci.yml" in names, "GitLab CI")
+    _append_if(
+        cloud_dependencies,
+        "datafactory" in evidence_text
+        or "data factory" in evidence_text
+        or "azure.datafactory" in evidence_text
+        or "microsoft.datafactory" in evidence_text
+        or any("datafactory" in path.lower() or "data-factory" in path.lower() for path in paths),
+        "Azure Data Factory",
+    )
+    _append_if(
+        cloud_dependencies,
+        "servicebus" in evidence_text
+        or "service bus" in evidence_text
+        or "azure.servicebus" in evidence_text
+        or "microsoft.servicebus" in evidence_text,
+        "Azure Service Bus",
+    )
+    _append_if(
+        cloud_dependencies,
+        "eventhub" in evidence_text
+        or "event hub" in evidence_text
+        or "azure.eventhub" in evidence_text
+        or "microsoft.eventhub" in evidence_text,
+        "Azure Event Hubs",
+    )
+    _append_if(
+        cloud_dependencies,
+        "applicationinsights" in evidence_text
+        or "application insights" in evidence_text
+        or "microsoft.applicationinsights" in evidence_text,
+        "Azure Application Insights",
+    )
+    _append_if(
+        external_dependencies,
+        "salesforce" in evidence_text,
+        "Salesforce",
+    )
 
     hosting_model = "Serverless" if "Azure Functions" in frameworks else "Containerized" if containers else "Application server"
     deployment_model = "Docker" if containers else "Unknown"
@@ -462,7 +518,7 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
         ])
         else "Application"
     )
-    dependency_graph = [f"Application -> {item}" for item in frameworks + runtimes + databases + package_managers]
+    dependency_graph = [f"Application -> {item}" for item in frameworks + runtimes + databases + package_managers + cloud_dependencies + external_dependencies]
 
     return RepositoryAnalysis(
         project_summary=_project_summary(application_type, architecture_pattern, languages, frameworks, runtimes, databases, package_managers, containers),
@@ -477,8 +533,8 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
         container_configs=containers,
         infrastructure_configs=infrastructure,
         cicd_configs=cicd,
-        external_dependencies=[],
-        cloud_dependencies=[],
+        external_dependencies=external_dependencies,
+        cloud_dependencies=cloud_dependencies,
         dependency_graph=dependency_graph,
         architecture_pattern=architecture_pattern,
         application_type=application_type,

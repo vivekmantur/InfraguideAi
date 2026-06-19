@@ -4,7 +4,6 @@ import { pricingRegions } from "../constants";
 import { fetchRegionalPricing } from "../api/pricing";
 import { responseErrorMessage } from "../api/assessments";
 import type { RegionalPrice, ServiceRecommendation } from "../types";
-import { formatMoney } from "../utils/format";
 import { KeyValue } from "./common";
 
 export function RegionalPricingModal({
@@ -26,25 +25,15 @@ export function RegionalPricingModal({
 }) {
   const [prices, setPrices] = React.useState<RegionalPrice[]>(initialPrices);
   const [selectedRegion, setSelectedRegion] = React.useState<RegionalPrice | null>(appliedRegion ?? initialPrices[0] ?? null);
-  const [isLoadingRegions, setIsLoadingRegions] = React.useState(initialPrices.length === 0 && ["Azure", "GCP"].includes(provider));
+  const [isLoadingRegions, setIsLoadingRegions] = React.useState(initialPrices.length === 0 && ["AWS", "Azure", "GCP"].includes(provider));
   const [regionalError, setRegionalError] = React.useState("");
   const [selectedPricingRegion, setSelectedPricingRegion] = React.useState("");
   const [hasLoadedRegionList, setHasLoadedRegionList] = React.useState(initialPrices.length > 0);
   const availableRegions = pricingRegions[provider] ?? [];
+  const tableCurrency = selectedRegion?.currency ?? prices[0]?.currency ?? "";
 
   React.useEffect(() => {
-    if (provider === "AWS") {
-      const rows = selectedPricingRegion ? initialPrices.filter((price) => price.region === selectedPricingRegion) : initialPrices.slice(0, 10);
-
-      setPrices(rows);
-      setSelectedRegion((current) => rows.find((row) => row.region === current?.region) ?? rows[0] ?? null);
-      setHasLoadedRegionList(initialPrices.length > 0);
-      setRegionalError("");
-      setIsLoadingRegions(false);
-      return;
-    }
-
-    if (!["Azure", "GCP"].includes(provider)) {
+    if (!["AWS", "Azure", "GCP"].includes(provider)) {
       return;
     }
 
@@ -128,7 +117,7 @@ export function RegionalPricingModal({
 
         {isLoadingRegions ? (
           <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
-            Loading regional pricing from {provider}. This can take a little longer for GCP because Google Billing pricing is paged by service and SKU.
+            Loading regional pricing from {provider}. This can take a little longer when the provider pricing catalog is paged by service and SKU.
           </div>
         ) : regionalError ? (
           <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">{regionalError}</div>
@@ -140,9 +129,9 @@ export function RegionalPricingModal({
                   <tr>
                     <th className="w-[23%] px-3 py-3 font-bold">Region</th>
                     <th className="w-[20%] px-3 py-3 font-bold">Runtime SKU</th>
-                    <th className="w-[14%] px-3 py-3 text-right font-bold">Runtime</th>
-                    <th className="w-[16%] px-3 py-3 text-right font-bold">Services Total</th>
-                    <th className="w-[14%] px-3 py-3 text-right font-bold">Total</th>
+                    <th className="w-[14%] px-3 py-3 text-right font-bold">Runtime{tableCurrency ? ` (${tableCurrency})` : ""}</th>
+                    <th className="w-[16%] px-3 py-3 text-right font-bold">Services Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
+                    <th className="w-[14%] px-3 py-3 text-right font-bold">Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
                     <th className="w-[13%] px-3 py-3 font-bold">Source</th>
                   </tr>
                 </thead>
@@ -154,9 +143,9 @@ export function RegionalPricingModal({
                       <tr key={`${price.provider ?? provider}-${price.region}`} className={`cursor-pointer border-t border-ink/10 transition hover:bg-cloud ${isSelected ? "bg-cloud" : ""}`} onClick={() => setSelectedRegion(price)}>
                         <td className="break-words px-3 py-3 font-semibold text-moss">{price.region}</td>
                         <td className="break-words px-3 py-3 text-ink/70">{price.runtime_sku || "Runtime"}</td>
-                        <td className="px-3 py-3 text-right">{formatMoney(price.currency, price.runtime_monthly)}</td>
-                        <td className="px-3 py-3 text-right">{formatMoney(price.currency, price.services_monthly)}</td>
-                        <td className="px-3 py-3 text-right font-bold">{formatMoney(price.currency, price.total_monthly)}</td>
+                        <td className="px-3 py-3 text-right">{formatAmount(price.runtime_monthly)}</td>
+                        <td className="px-3 py-3 text-right">{formatAmount(price.services_monthly)}</td>
+                        <td className="px-3 py-3 text-right font-bold">{formatAmount(price.total_monthly)}</td>
                         <td className="break-words px-3 py-3 text-ink/65">{price.source ?? "Pricing API"}</td>
                       </tr>
                     );
@@ -197,9 +186,9 @@ function RegionServiceBreakdown({
         <p className="mt-1 text-sm text-ink/65">Service cost breakdown for this region.</p>
       </div>
 
-      <KeyValue label="Runtime" value={formatMoney(price.currency, price.runtime_monthly)} />
-      <KeyValue label="Services Total" value={formatMoney(price.currency, price.services_monthly)} />
-      <KeyValue label="Total" value={formatMoney(price.currency, price.total_monthly)} />
+      <KeyValue label={`Runtime (${price.currency})`} value={formatAmount(price.runtime_monthly)} />
+      <KeyValue label={`Services Total (${price.currency})`} value={formatAmount(price.services_monthly)} />
+      <KeyValue label={`Total (${price.currency})`} value={formatAmount(price.total_monthly)} />
       <div className="mt-4">
         <button
           type="button"
@@ -220,7 +209,7 @@ function RegionServiceBreakdown({
                   <div className="font-semibold">{service.component}</div>
                   {service.recommended && <div className="mt-1 text-xs leading-5 text-ink/60">{service.recommended}</div>}
                 </div>
-                <div className="text-right font-bold">{formatMoney(service.currency ?? price.currency, service.monthly_cost)}</div>
+                <div className="text-right font-bold">{formatAmount(service.monthly_cost)}</div>
               </div>
             </div>
           ))
@@ -232,4 +221,8 @@ function RegionServiceBreakdown({
       </div>
     </aside>
   );
+}
+
+function formatAmount(amount: number) {
+  return amount.toLocaleString(undefined, { maximumFractionDigits: 2 });
 }

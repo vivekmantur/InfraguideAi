@@ -2,7 +2,6 @@ from __future__ import annotations
 from uuid import uuid4
 from .ai import (
     generate_architect_reasoning,
-    generate_aws_pricing_estimate,
     generate_migration_guidance,
     generate_service_recommendations,
 )
@@ -10,6 +9,7 @@ from .migration_strategy import determine_migration_strategy, assess_strategy_al
 from app.services.mcp_client import (
     CloudMcpClient
 )
+from app.services.aws_pricing import AwsPricingClient
 from .models import (
     AssessmentRequest,
     AssessmentResponse,
@@ -32,6 +32,12 @@ SERVICE_MAP = {
         "storage": "Azure Blob Storage",
         "secrets": "Azure Key Vault",
         "monitoring": "Azure Monitor",
+        "data_integration": "Azure Data Factory",
+        "queue": "Azure Service Bus",
+        "streaming": "Azure Event Hubs",
+        "registry": "Azure Container Registry",
+        "api_gateway": "Azure API Management",
+        "cdn_waf": "Azure Front Door with Web Application Firewall",
     },
     "AWS": {
         "container": "Amazon ECS Fargate",
@@ -40,6 +46,12 @@ SERVICE_MAP = {
         "storage": "Amazon S3",
         "secrets": "AWS Secrets Manager",
         "monitoring": "Amazon CloudWatch",
+        "data_integration": "AWS Glue",
+        "queue": "Amazon SQS",
+        "streaming": "Amazon Kinesis",
+        "registry": "Amazon ECR",
+        "api_gateway": "Amazon API Gateway",
+        "cdn_waf": "Amazon CloudFront with AWS WAF",
     },
     "GCP": {
         "container": "Cloud Run",
@@ -48,6 +60,12 @@ SERVICE_MAP = {
         "storage": "Cloud Storage",
         "secrets": "Secret Manager",
         "monitoring": "Cloud Monitoring",
+        "data_integration": "Cloud Data Fusion",
+        "queue": "Pub/Sub",
+        "streaming": "Pub/Sub",
+        "registry": "Artifact Registry",
+        "api_gateway": "API Gateway",
+        "cdn_waf": "Cloud CDN with Cloud Armor",
     },
 }
 
@@ -350,7 +368,60 @@ def _services(provider: str, analysis: RepositoryAnalysis) -> list[ServiceRecomm
             1,
             ServiceRecommendation(component="Database", current=_join(analysis.databases), recommended=cloud["database"]),
         )
+    if _has_dependency_signal(analysis, ["data factory", "datafactory", "etl", "data pipeline"]):
+        services.append(
+            ServiceRecommendation(component="Data Integration", current=_matched_dependency(analysis, ["Data Factory", "ETL", "data pipeline"]), recommended=cloud["data_integration"])
+        )
+    if _has_dependency_signal(analysis, ["service bus", "queue", "sqs", "pub/sub"]):
+        services.append(
+            ServiceRecommendation(component="Messaging", current=_matched_dependency(analysis, ["Service Bus", "queue", "Pub/Sub"]), recommended=cloud["queue"])
+        )
+    if _has_dependency_signal(analysis, ["event hub", "eventhub", "kinesis", "streaming"]):
+        services.append(
+            ServiceRecommendation(component="Event Streaming", current=_matched_dependency(analysis, ["Event Hubs", "streaming"]), recommended=cloud["streaming"])
+        )
+    if analysis.container_configs:
+        services.append(
+            ServiceRecommendation(component="Container Registry", current=_join(analysis.container_configs), recommended=cloud["registry"])
+        )
+    if "HTTP" in analysis.triggers and analysis.application_type == "Web Application":
+        services.append(
+            ServiceRecommendation(component="API Gateway", current="HTTP application endpoint", recommended=cloud["api_gateway"])
+        )
+    if request_public_edge(analysis):
+        services.append(
+            ServiceRecommendation(component="Edge Security", current="Public web traffic", recommended=cloud["cdn_waf"])
+        )
     return services
+
+
+def _has_dependency_signal(analysis: RepositoryAnalysis, signals: list[str]) -> bool:
+    haystack = " ".join(
+        [
+            *analysis.cloud_dependencies,
+            *analysis.external_dependencies,
+            *analysis.dependency_graph,
+            *analysis.infrastructure_configs,
+            *analysis.frameworks,
+        ]
+    ).lower()
+    return any(signal.lower() in haystack for signal in signals)
+
+
+def _matched_dependency(analysis: RepositoryAnalysis, labels: list[str]) -> str:
+    dependencies = [*analysis.cloud_dependencies, *analysis.external_dependencies]
+    for label in labels:
+        for dependency in dependencies:
+            if label.lower() in dependency.lower():
+                return dependency
+    return labels[0]
+
+
+def request_public_edge(analysis: RepositoryAnalysis) -> bool:
+    return "HTTP" in analysis.triggers and any(
+        item in analysis.frameworks
+        for item in ["React", "Next.js", "ASP.NET Core MVC"]
+    )
 
 
 async def _cost_estimate(
@@ -720,7 +791,7 @@ async def _cost_estimate(
                     "heuristic pricing."
                 )
     # --------------------------------------------------
-    # AWS Pricing Through Groq
+    # AWS Pricing Through AWS Price List API
     # --------------------------------------------------
 
     if provider == "AWS":
@@ -731,27 +802,29 @@ async def _cost_estimate(
             else CloudSizingRequirements()
         )
 
-        pricing_data, pricing_warnings = (
-            generate_aws_pricing_estimate(
-                analysis,
-                request.requirements,
-                [
+        try:
+            pricing_data = AwsPricingClient().regional_pricing(
+                cpu=cloud_sizing.cpu_cores,
+                memory=cloud_sizing.memory_gb,
+                services=[
                     service.model_dump()
                     for service in (services or [])
                 ],
-                cloud_sizing,
+                limit=10,
             )
-        )
-
-        for warning in pricing_warnings:
-            print(warning)
+        except Exception as exc:
+            pricing_data = None
+            print(
+                "AWS Price List API request failed. "
+                "Falling back to heuristic pricing."
+            )
+            print(exc)
 
         if pricing_data:
-
             regional_prices = [
                 row
                 for row in pricing_data.get(
-                    "regional_prices",
+                    "regions",
                     []
                 )
                 if isinstance(
@@ -864,8 +937,8 @@ async def _cost_estimate(
                     else []
                 ) or [
                     (
-                        "Summary pricing uses the lowest estimated "
-                        "AWS region from the regional comparison."
+                        "Summary pricing uses the lowest AWS region "
+                        "from the regional comparison."
                     ),
                     (
                         f"Estimated application sizing: {cloud_sizing.cpu_cores} "
@@ -873,8 +946,9 @@ async def _cost_estimate(
                         f"{cloud_sizing.storage_gb} GB storage."
                     ),
                     (
-                        "Regional pricing was estimated by Groq using "
-                        "current AWS service pricing patterns."
+                        "Runtime pricing retrieved from AWS Price List API. "
+                        "Managed service rows use AWS Pricing API where practical "
+                        "and conservative usage assumptions for low-volume services."
                     ),
                 ]
 
@@ -891,7 +965,7 @@ async def _cost_estimate(
                 )
 
         print(
-            "AWS pricing LLM estimate failed. "
+            "AWS pricing API estimate failed. "
             "Falling back to heuristic pricing."
         )
 
@@ -1090,89 +1164,154 @@ def _strategy(request: AssessmentRequest | FolderAssessmentRequest, readiness: R
 
 
 def _roadmap(strategy: str, analysis: RepositoryAnalysis, provider: str) -> list[str]:
+    cloud = SERVICE_MAP[provider]
     stack = _join(
         analysis.frameworks
         or analysis.runtimes
         or analysis.languages
+    )
+    runtime_target = (
+        cloud["function"]
+        if "Azure Functions" in analysis.frameworks
+        else cloud["container"]
     )
     package_step = (
         f"validate {_join(analysis.package_managers)} dependency restore and build commands"
         if analysis.package_managers
         else "document dependency restore and build commands"
     )
+    sizing = analysis.cloud_sizing
+    sizing_text = (
+        f"{sizing.cpu_cores or 2} vCPU and {sizing.memory_gb or 4} GB RAM"
+        if sizing
+        else "the validated production sizing baseline"
+    )
+
+    steps = [
+        (
+            f"Discovery and scope: confirm the {stack} application modules, owners, "
+            f"business critical paths, {strategy.lower()} success criteria, target environments, "
+            "and rollback decision points."
+        ),
+        (
+            f"Repository and build assessment: inventory detected runtimes ({_join(analysis.runtimes)}), "
+            f"frameworks ({_join(analysis.frameworks)}), package managers "
+            f"({_join(analysis.package_managers) if analysis.package_managers else 'not detected'}), "
+            f"entry points ({_join(analysis.triggers) if analysis.triggers else 'not detected'}), "
+            f"and {package_step}."
+        ),
+        (
+            f"Dependency mapping: validate application dependencies including databases "
+            f"({_join(analysis.databases) if analysis.databases else 'not detected'}), cloud services "
+            f"({_join(analysis.cloud_dependencies) if analysis.cloud_dependencies else 'not detected'}), "
+            f"external integrations ({_join(analysis.external_dependencies) if analysis.external_dependencies else 'not detected'}), "
+            f"storage requirements ({_join(analysis.storage_dependencies) if analysis.storage_dependencies else 'not detected'}), "
+            "ports, background jobs, and environment-specific configuration."
+        ),
+        (
+            f"Target architecture design: map the current {analysis.hosting_model} hosting model "
+            f"and {analysis.deployment_model} deployment model to {provider} services such as "
+            f"{runtime_target}, {cloud['database']}, {cloud['storage']}, {cloud['secrets']}, "
+            f"and {cloud['monitoring']}."
+        ),
+        (
+            f"Landing zone setup: provision {provider} accounts/projects, resource groups, "
+            "network segmentation, private access where required, IAM/RBAC roles, tagging, "
+            "audit logging, and separate dev, test, and production environments."
+        ),
+    ]
 
     if "Azure Functions" in analysis.frameworks:
-        steps = [
-            (
-                f"Repository Preparation: document detected serverless runtime "
-                f"({_join(analysis.runtimes)}) triggers, app settings, bindings, "
-                f"and {package_step}."
-            ),
-            (
-                f"Serverless Runtime Setup: create target {provider} function runtime, "
-                "storage account, managed identity, secrets, and monitoring workspace."
-            ),
-        ]
-    else:
-        steps = [
-            (
-                f"Repository Preparation: document detected {stack} runtime, "
-                f"environment variables, and {package_step}."
-            ),
-        ]
-
-        if analysis.container_configs:
-            steps.append(
-                (
-                    f"Containerization: validate existing container artifacts "
-                    f"({_join(analysis.container_configs)}) and publish a versioned image."
-                )
-            )
-        else:
-            steps.append(
-                (
-                    f"Containerization: create a Dockerfile for the {stack} workload "
-                    "and verify local build/run behavior."
-                )
-            )
-
-    if analysis.cicd_configs:
         steps.append(
             (
-                f"CI/CD: extend detected pipeline configuration ({_join(analysis.cicd_configs)}) "
-                "with image build, security scan, approval, and deployment stages."
+                f"Runtime preparation: configure the target serverless runtime on {runtime_target}, "
+                "including triggers, bindings, app settings, managed identity, scaling limits, "
+                f"and {sizing_text} capacity assumptions."
+            )
+        )
+    elif analysis.container_configs:
+        steps.append(
+            (
+                f"Runtime preparation: validate existing container artifacts "
+                f"({_join(analysis.container_configs)}), harden the image, publish it to "
+                f"{cloud['registry']}, and deploy it to {runtime_target} with {sizing_text}."
             )
         )
     else:
         steps.append(
             (
-                f"CI/CD: add a pipeline for {_join(analysis.package_managers) if analysis.package_managers else stack} "
-                "build, test, security scan, approval, and cloud deployment."
+                f"Runtime preparation: create a Dockerfile or deployment package for the {stack} "
+                f"workload, validate local build/run behavior, publish artifacts to {cloud['registry']}, "
+                f"and size the target {runtime_target} environment using {sizing_text}."
             )
         )
 
     if analysis.databases:
         steps.append(
             (
-                f"Database Migration: plan {_join(analysis.databases)} schema migration, "
-                "backup, validation, connection string rotation, and managed database cutover."
+                f"Database and data migration: migrate {_join(analysis.databases)} schema and data "
+                f"to {cloud['database']} using backup/restore or migration tooling, then validate "
+                "row counts, stored procedures, indexes, connection strings, and rollback backups."
+            )
+        )
+
+    if analysis.cloud_dependencies:
+        steps.append(
+            (
+                f"Cloud service integration: replace or reconfigure detected cloud dependencies "
+                f"({_join(analysis.cloud_dependencies)}) with target {provider} services, managed identity, "
+                "least-privilege access, retry policies, and environment-specific endpoints."
+            )
+        )
+
+    steps.append(
+        (
+            f"Configuration and secrets: move application settings, connection strings, API keys, "
+            f"and runtime environment values into {cloud['secrets']} and configure secure injection "
+            "for dev, test, and production deployments."
+        )
+    )
+
+    if analysis.cicd_configs:
+        steps.append(
+            (
+                f"CI/CD and infrastructure automation: extend detected pipeline configuration "
+                f"({_join(analysis.cicd_configs)}) with dependency restore, tests, security scans, "
+                "infrastructure deployment, approval gates, smoke tests, and rollback tasks."
+            )
+        )
+    else:
+        steps.append(
+            (
+                f"CI/CD and infrastructure automation: add a pipeline for "
+                f"{_join(analysis.package_managers) if analysis.package_managers else stack} build, "
+                "unit tests, security scans, infrastructure provisioning, approvals, deployment, "
+                "and rollback automation."
             )
         )
 
     steps.extend(
         [
             (
-                f"Cloud Service Setup: provision target {provider} runtime for {stack}, "
-                "storage, secrets, monitoring, and network access."
+                f"Observability setup: configure {cloud['monitoring']} dashboards, application logs, "
+                "metrics, alerts, distributed tracing where supported, release annotations, and "
+                "retention policies for the migrated workload."
             ),
             (
-                f"Validation: run smoke tests for detected HTTP/runtime flows "
+                f"Validation and performance testing: run smoke, integration, regression, and load "
+                f"tests for detected HTTP/runtime flows "
                 f"({_join(analysis.triggers) if analysis.triggers else 'application entry points'}), "
-                "performance checks, security review, and rollback rehearsal."
+                "validate database behavior, verify security controls, and complete rollback rehearsal."
             ),
             (
-                f"Production Cutover: execute {strategy.lower()} migration, monitor "
-                f"{stack} live traffic, and optimize cloud costs."
+                f"Production cutover: execute the {strategy.lower()} migration using a controlled "
+                "deployment window, DNS or traffic switch, database freeze or synchronization plan, "
+                "real-time monitoring, and a clear rollback threshold."
+            ),
+            (
+                f"Post-migration optimization: review {stack} live traffic, right-size compute, "
+                "tune database and storage costs, close temporary migration access, update runbooks, "
+                "and hand over operational ownership."
             ),
         ]
     )

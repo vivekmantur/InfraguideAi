@@ -22,7 +22,7 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
   const activeMonthlyValue = appliedRegionalPrice ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly) : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.monthly);
   const activeAnnualValue = appliedRegionalPrice ? formatMoney(appliedRegionalPrice.currency, appliedRegionalPrice.total_monthly * 12) : formatMoney(assessment.cost_estimation.currency, assessment.cost_estimation.annual);
   const activeRangeValue = appliedRegionalPrice ? `${appliedRegionalPrice.region} selected` : assessment.cost_estimation.monthly_range ?? "Not estimated";
-  const activeRegion = appliedRegionalPrice?.region ?? defaultRegion(assessment.recommended_provider);
+  const activeRegion = appliedRegionalPrice?.region ?? defaultCostRegion(assessment);
   const targetRuntimeService = applicationRuntimeService(assessment);
   const activeLineItems = appliedRegionalPrice
     ? [
@@ -90,10 +90,9 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
         </button>
       </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
+      <div className="report-card-flow">
         <Panel title="Technology Stack">
           <KeyValue label="Languages" value={list(assessment.technology_stack.languages)} />
-          <KeyValue label="Summary" value={assessment.technology_stack.project_summary ?? assessment.architecture_summary} />
           <KeyValue label="Frameworks" value={list(assessment.technology_stack.frameworks)} />
           <KeyValue label="Runtime" value={list(assessment.technology_stack.runtimes)} />
           <KeyValue label="Hosting" value={assessment.technology_stack.hosting_model ?? "Not detected"} />
@@ -180,13 +179,13 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
           title="Cost And Strategy"
           action={
             <button type="button" className="rounded-md border border-moss px-3 py-1.5 text-sm font-semibold text-moss transition hover:bg-moss hover:text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setIsPricingModalOpen(true)}>
-              View more
+              Compare and select
             </button>
           }
         >
           <KeyValue label="Provider" value={assessment.recommended_provider} />
           <KeyValue label="Strategy" value={assessment.migration_strategy} />
-          <KeyValue label="Location" value={appliedRegionalPrice?.region ?? "Default estimate"} />
+          <KeyValue label="Location" value={activeRegion} />
           <KeyValue label="Monthly" value={activeMonthlyValue} />
           <KeyValue label="Range" value={activeRangeValue} />
           <KeyValue label="Annual" value={activeAnnualValue} />
@@ -194,9 +193,7 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
             <List items={activeLineItems} />
           </div>
         </Panel>
-      </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-2">
         <Panel title="Dependencies">
           <KeyValue label="Cloud" value={list(assessment.technology_stack.cloud_dependencies)} />
           <List items={assessment.technology_stack.dependency_graph} />
@@ -237,6 +234,20 @@ function defaultRegion(provider: string) {
   if (provider === "Azure") return "eastus";
   if (provider === "GCP") return "us-central1";
   return "us-east-1";
+}
+
+function defaultCostRegion(assessment: Assessment) {
+  const regionalPrice = assessment.cost_estimation.regional_prices?.[0]?.region;
+  if (regionalPrice) {
+    return regionalPrice;
+  }
+
+  const regionAssumption = assessment.cost_estimation.assumptions?.find((item) => item.toLowerCase().startsWith("azure region:"));
+  if (regionAssumption) {
+    return regionAssumption.split(":").slice(1).join(":").trim();
+  }
+
+  return defaultRegion(assessment.recommended_provider);
 }
 
 function applicationRuntimeService(assessment: Assessment) {

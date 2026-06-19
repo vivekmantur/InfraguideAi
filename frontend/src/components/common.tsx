@@ -3,9 +3,9 @@ import { FileText } from "lucide-react";
 
 export function Metric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="min-w-28 rounded-md border border-ink/10 bg-cloud px-4 py-3">
-      <div className="text-xs font-semibold uppercase tracking-wide text-ink/55">{label}</div>
-      <div className="mt-1 text-lg font-bold text-ink">{value}</div>
+    <div className="min-w-24 rounded-md border border-ink/10 bg-cloud px-3 py-2">
+      <div className="text-[0.68rem] font-semibold uppercase tracking-wide text-ink/55">{label}</div>
+      <div className="mt-0.5 text-base font-bold text-ink">{value}</div>
     </div>
   );
 }

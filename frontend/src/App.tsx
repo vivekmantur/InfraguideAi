@@ -1,13 +1,39 @@
 import React from "react";
-import { CloudCog, FolderOpen, GitBranch, Loader2, Route, ServerCog, Trash2, X } from "lucide-react";
+import { FolderOpen, GitBranch, Loader2, Route, ServerCog, Trash2, X } from "lucide-react";
 import { responseErrorMessage, submitGithubAssessment, submitUploadedAssessment } from "./api/assessments";
 import { FieldError, Metric, RequiredLabel, Select } from "./components/common";
 import { Report } from "./components/Report";
 import { emptyRequirements, fieldLabels, MAX_UPLOAD_BYTES, options, requiredFieldMessage } from "./constants";
+import cognineLogo from "./static/image (7).png";
 import type { Assessment, FieldErrors, Requirements, SourceMode } from "./types";
 import { hasRepositoryCloneFailure, needsGithubAccessToken, repositoryCloneFailureMessage } from "./utils/assessment";
 import { analyzableFiles } from "./utils/files";
 import { downloadAssessmentWordDocument } from "./utils/wordDocument";
+
+function InfraGuideMark() {
+  return (
+    <svg className="h-14 w-14 shrink-0" viewBox="0 0 64 64" role="img" aria-label="InfraGuide AI">
+      <defs>
+        <linearGradient id="infraGuideMarkGradient" x1="12" x2="52" y1="10" y2="54" gradientUnits="userSpaceOnUse">
+          <stop stopColor="#2f5d50" />
+          <stop offset="1" stopColor="#df6842" />
+        </linearGradient>
+      </defs>
+      <rect width="64" height="64" rx="14" fill="#eef2ef" />
+      <path
+        d="M20.2 33.5c-4.2 0-7.2-2.8-7.2-6.5 0-3.4 2.5-6.1 6.1-6.5 1.7-4.6 6-7.5 11-7.5 5.8 0 10.5 3.8 11.6 9.1 4.4.3 7.8 3.6 7.8 7.8 0 4.5-3.7 8-8.4 8H20.2Z"
+        fill="#ffffff"
+        stroke="#2f5d50"
+        strokeWidth="3"
+        strokeLinejoin="round"
+      />
+      <path d="M20 45h12c5.7 0 7.3-8 13-8h3" fill="none" stroke="url(#infraGuideMarkGradient)" strokeWidth="3.5" strokeLinecap="round" />
+      <circle cx="20" cy="45" r="4" fill="#ffffff" stroke="#df6842" strokeWidth="3" />
+      <circle cx="34" cy="45" r="4" fill="#ffffff" stroke="#2f5d50" strokeWidth="3" />
+      <circle cx="48" cy="37" r="4" fill="#ffffff" stroke="#df6842" strokeWidth="3" />
+    </svg>
+  );
+}
 
 export function App() {
   const [sourceMode, setSourceMode] = React.useState<SourceMode>("github");
@@ -182,29 +208,33 @@ export function App() {
   }
 
   return (
-    <main className="min-h-screen bg-cloud text-ink">
-      <section className="border-b border-ink/10 bg-white">
-        <div className="mx-auto flex max-w-7xl flex-col gap-5 px-5 py-6 lg:flex-row lg:items-end lg:justify-between">
-          <div>
-            <div className="mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-moss">
-              <CloudCog size={18} />
-              Cloud Migration Intelligence Platform
+    <main className="app-shell bg-cloud text-ink">
+      <section className="app-header border-b border-ink/10 bg-white">
+        <div className="flex w-full flex-col gap-3 px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <InfraGuideMark />
+            <div className="min-w-0">
+              <div className="mb-0.5 text-[0.7rem] font-semibold uppercase tracking-wide text-moss">
+                Cloud Migration Intelligence Platform
+              </div>
+              <h1 className="text-[2rem] font-bold leading-tight tracking-normal">InfraGuide AI</h1>
+              <p className="mt-1 max-w-3xl text-sm leading-5 text-ink/70">
+                Analyze application repositories, evaluate cloud readiness, map services, estimate costs, and generate a practical migration roadmap.
+              </p>
             </div>
-            <h1 className="text-4xl font-bold tracking-normal sm:text-5xl">InfraGuide AI</h1>
-            <p className="mt-3 max-w-3xl text-base leading-7 text-ink/70">
-              Analyze application repositories, evaluate cloud readiness, map services, estimate costs, and generate a practical migration roadmap.
-            </p>
           </div>
-          <div className="grid grid-cols-3 gap-3 text-center">
-            <Metric label="Readiness" value={assessment ? `${assessment.cloud_readiness.score}%` : "--"} />
-            <Metric label="Provider" value={assessment?.recommended_provider ?? "--"} />
-            <Metric label="Strategy" value={assessment?.migration_strategy ?? "--"} />
+          <div className="flex shrink-0 flex-col gap-3 lg:items-end">
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <Metric label="Readiness" value={assessment ? `${assessment.cloud_readiness.score}%` : "--"} />
+              <Metric label="Provider" value={assessment?.recommended_provider ?? "--"} />
+              <Metric label="Strategy" value={assessment?.migration_strategy ?? "--"} />
+            </div>
           </div>
         </div>
       </section>
 
-      <section className="grid w-full items-start gap-5 px-5 py-5 lg:grid-cols-[420px_minmax(0,1fr)]">
-        <form onSubmit={submitAssessment} className="main-panel rounded-lg border border-ink/10 bg-white p-5 shadow-panel lg:sticky lg:top-5">
+      <section className="app-content grid w-full items-start gap-4 px-4 py-4 lg:grid-cols-[420px_minmax(0,1fr)]">
+        <form onSubmit={submitAssessment} className="main-panel rounded-lg border border-ink/10 bg-white p-5 shadow-panel">
           <div className="mb-5 flex items-center gap-2">
             {sourceMode === "github" ? <GitBranch size={20} className="text-signal" /> : <FolderOpen size={20} className="text-signal" />}
             <h2 className="text-xl font-semibold">Migration Input</h2>
@@ -292,7 +322,7 @@ export function App() {
           {error && <p className="mt-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</p>}
         </form>
 
-        <section className="main-panel rounded-lg border border-ink/10 bg-white p-5 shadow-panel">
+        <section className="report-panel rounded-lg border border-ink/10 bg-white p-5 shadow-panel">
           {assessment ? (
             <Report assessment={assessment} onDownload={downloadBlueprint} />
           ) : (
@@ -304,6 +334,14 @@ export function App() {
           )}
         </section>
       </section>
+
+      <footer className="app-footer flex items-center justify-between border-t border-ink/10 bg-white px-4 py-2 text-xs text-ink/55">
+        <span>InfraGuide AI</span>
+        <span className="flex items-center gap-2 font-semibold uppercase tracking-wide">
+          Powered by
+          <img className="h-4 w-20 object-contain" src={cognineLogo} alt="Cognine" />
+        </span>
+      </footer>
 
       {isTokenModalOpen && (
         <div className="modal-backdrop" role="presentation">

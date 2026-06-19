@@ -9,6 +9,7 @@ from fastapi.responses import PlainTextResponse
 from .analyzer import analyze_local_repository, analyze_repository
 from .models import AssessmentRequest, BlueprintRequest, FolderAssessmentRequest, MigrationRequirements
 from .recommendation import build_assessment, render_blueprint
+from .services.aws_pricing import AwsPricingClient
 from .services.mcp_client import CloudMcpClient
 
 app = FastAPI(title="InfraGuide AI API", version="0.1.0")
@@ -123,10 +124,12 @@ async def regional_pricing(payload: dict):
             return await mcp_client.get_gcp_regional_pricing(cpu, memory, services, limit, region)
         if provider == "Azure":
             return await mcp_client.get_azure_regional_pricing(cpu, memory, services, limit, region)
+        if provider == "AWS":
+            return AwsPricingClient().regional_pricing(cpu, memory, services, limit, region)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"Regional pricing failed: {exc}") from exc
 
-    raise HTTPException(status_code=400, detail="Regional pricing is available for Azure and GCP only.")
+    raise HTTPException(status_code=400, detail="Regional pricing is available for AWS, Azure, and GCP.")
 
 
 @app.get("/cloud-intelligence/health")
