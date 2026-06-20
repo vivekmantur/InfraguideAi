@@ -3,12 +3,6 @@ import type { Requirements } from "../types";
 
 export function submitGithubAssessment(repositoryUrl: string, requirements: Requirements, githubToken = "") {
   const trimmedUrl = repositoryUrl.trim();
-  if (!trimmedUrl) {
-    throw new Error("Enter a GitHub repository URL before generating a blueprint.");
-  }
-  if (!/^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/?$/.test(trimmedUrl)) {
-    throw new Error("Enter a valid GitHub repository URL, for example https://github.com/owner/repository.");
-  }
 
   return fetch(`${API_BASE_URL}/assessments`, {
     method: "POST",
@@ -30,6 +24,18 @@ export function submitUploadedAssessment(files: File[], requirements: Requiremen
   }
 
   return fetch(`${API_BASE_URL}/assessments/upload`, {
+    method: "POST",
+    body: formData,
+  });
+}
+
+export function submitZipAssessment(archive: File, requirements: Requirements, projectName: string) {
+  const formData = new FormData();
+  formData.append("requirements", JSON.stringify(requirements));
+  formData.append("project_name", projectName);
+  formData.append("archive", archive, archive.name);
+
+  return fetch(`${API_BASE_URL}/assessments/upload-zip`, {
     method: "POST",
     body: formData,
   });

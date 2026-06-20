@@ -20,7 +20,7 @@ function friendlyRepositoryCloneFailureMessage(warning?: string) {
   const normalizedWarning = (warning ?? "").toLowerCase();
 
   if (normalizedWarning.includes("filename too long") || normalizedWarning.includes("unable to checkout working tree")) {
-    return "GitHub clone failed because this repository contains file paths that are too long for Windows checkout. Try enabling long paths in Windows/Git, or upload the project folder after excluding build output folders like bin and obj.";
+    return "GitHub clone failed because this repository contains file paths that are too long for Windows checkout. Try enabling long paths in Windows/Git, or upload a project ZIP without build output folders like bin and obj.";
   }
 
   if (normalizedWarning.includes("without a github access token") || normalizedWarning.includes("authentication") || normalizedWarning.includes("not accessible")) {
@@ -32,7 +32,7 @@ function friendlyRepositoryCloneFailureMessage(warning?: string) {
   }
 
   if (normalizedWarning.includes("timed out") || normalizedWarning.includes("timeout")) {
-    return "GitHub clone timed out. Try again, or upload the project folder directly.";
+    return "GitHub clone timed out. Try again, or upload a project ZIP directly.";
   }
 
   return "GitHub clone failed. Check that the repository URL is correct and try again.";

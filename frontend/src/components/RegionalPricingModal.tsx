@@ -88,19 +88,19 @@ export function RegionalPricingModal({
   return (
     <div className="modal-backdrop" role="presentation">
       <section className="modal-panel regional-pricing-modal" role="dialog" aria-modal="true" aria-labelledby="regionalPricingTitle">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div className="flex min-w-0 flex-1 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="pricing-modal-header">
+          <div className="pricing-modal-title-row">
             <div>
-              <h2 id="regionalPricingTitle" className="text-xl font-semibold">
+              <h2 id="regionalPricingTitle" className="modal-title">
                 {provider} regional pricing
               </h2>
-              <p className="mt-1 text-sm text-ink/65">Monthly estimate by region for runtime and recommended services.</p>
+              <p className="modal-subtitle">Monthly estimate by region for runtime and recommended services.</p>
             </div>
             {availableRegions.length > 0 && (
-              <label className="w-full sm:w-64">
+              <label className="pricing-region-field">
                 <span className="field-label">Location</span>
                 <select className="input" value={selectedPricingRegion} onChange={(event) => setSelectedPricingRegion(event.target.value)} disabled={!hasLoadedRegionList || isLoadingRegions}>
-                  <option value="">Top 10 regions</option>
+                  <option value="">Available regions</option>
                   {availableRegions.map((region) => (
                     <option key={region} value={region}>
                       {region}
@@ -116,27 +116,27 @@ export function RegionalPricingModal({
         </div>
 
         {isLoadingRegions ? (
-          <div className="flex min-h-[18rem] items-center justify-center rounded-md border border-ink/10 bg-cloud p-6">
-            <div className="flex flex-col items-center gap-3 text-center">
-              <Loader2 className="animate-spin text-moss" size={34} aria-hidden="true" />
-              <div className="text-sm font-semibold text-ink">Loading {provider} regional pricing</div>
-              <div className="text-xs text-ink/60">Fetching provider catalog and service SKU costs.</div>
+          <div className="pricing-loading">
+            <div className="pricing-loading-content">
+              <Loader2 className="pricing-loading-icon animate-spin" size={34} aria-hidden="true" />
+              <div className="pricing-loading-title">Loading {provider} regional pricing</div>
+              <div className="pricing-loading-copy">Fetching provider catalog and service SKU costs.</div>
             </div>
           </div>
         ) : regionalError ? (
-          <div className="rounded-md border border-red-200 bg-red-50 p-4 text-sm leading-6 text-red-700">{regionalError}</div>
+          <div className="pricing-error">{regionalError}</div>
         ) : prices.length > 0 ? (
-          <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_24rem]">
-            <div className="overflow-x-hidden overflow-y-auto rounded-md border border-ink/10">
-              <table className="w-full table-fixed border-collapse text-left text-sm">
-                <thead className="bg-cloud text-xs uppercase text-ink/60">
+          <div className="pricing-grid">
+            <div className="pricing-table-wrap">
+              <table className="pricing-table">
+                <thead className="pricing-table-head">
                   <tr>
-                    <th className="w-[23%] px-3 py-3 font-bold">Region</th>
-                    <th className="w-[20%] px-3 py-3 font-bold">Runtime SKU</th>
-                    <th className="w-[14%] px-3 py-3 text-right font-bold">Runtime{tableCurrency ? ` (${tableCurrency})` : ""}</th>
-                    <th className="w-[16%] px-3 py-3 text-right font-bold">Services Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
-                    <th className="w-[14%] px-3 py-3 text-right font-bold">Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
-                    <th className="w-[13%] px-3 py-3 font-bold">Source</th>
+                    <th className="pricing-col-region">Region</th>
+                    <th className="pricing-col-runtime">Runtime SKU</th>
+                    <th className="pricing-col-money">Runtime{tableCurrency ? ` (${tableCurrency})` : ""}</th>
+                    <th className="pricing-col-services">Services Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
+                    <th className="pricing-col-money">Total{tableCurrency ? ` (${tableCurrency})` : ""}</th>
+                    <th className="pricing-col-source">Source</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -144,13 +144,13 @@ export function RegionalPricingModal({
                     const isSelected = selectedRegion?.region === price.region;
 
                     return (
-                      <tr key={`${price.provider ?? provider}-${price.region}`} className={`cursor-pointer border-t border-ink/10 transition hover:bg-cloud ${isSelected ? "bg-cloud" : ""}`} onClick={() => setSelectedRegion(price)}>
-                        <td className="break-words px-3 py-3 font-semibold text-moss">{price.region}</td>
-                        <td className="break-words px-3 py-3 text-ink/70">{price.runtime_sku || "Runtime"}</td>
-                        <td className="px-3 py-3 text-right">{formatAmount(price.runtime_monthly)}</td>
-                        <td className="px-3 py-3 text-right">{formatAmount(price.services_monthly)}</td>
-                        <td className="px-3 py-3 text-right font-bold">{formatAmount(price.total_monthly)}</td>
-                        <td className="break-words px-3 py-3 text-ink/65">{price.source ?? "Pricing API"}</td>
+                      <tr key={`${price.provider ?? provider}-${price.region}`} className={`pricing-row ${isSelected ? "pricing-row-selected" : ""}`} onClick={() => setSelectedRegion(price)}>
+                        <td className="pricing-region-cell">{price.region}</td>
+                        <td className="pricing-text-cell">{price.runtime_sku || "Runtime"}</td>
+                        <td className="pricing-money-cell">{formatAmount(price.runtime_monthly)}</td>
+                        <td className="pricing-money-cell">{formatAmount(price.services_monthly)}</td>
+                        <td className="pricing-total-cell">{formatAmount(price.total_monthly)}</td>
+                        <td className="pricing-source-cell">{price.source ?? "Pricing API"}</td>
                       </tr>
                     );
                   })}
@@ -161,7 +161,7 @@ export function RegionalPricingModal({
             <RegionServiceBreakdown price={selectedRegion} appliedRegion={appliedRegion} onApply={onApply} />
           </div>
         ) : (
-          <div className="rounded-md border border-ink/10 bg-cloud p-4 text-sm leading-6 text-ink/70">
+          <div className="pricing-empty">
             Regional pricing rows were not returned for this assessment. Regenerate the blueprint after restarting the backend, MCP server, and bridge so the latest regional pricing endpoints are active.
           </div>
         )}
@@ -180,23 +180,23 @@ function RegionServiceBreakdown({
   onApply: (price: RegionalPrice) => void;
 }) {
   if (!price) {
-    return <aside className="rounded-md border border-ink/10 bg-cloud p-4 text-sm text-ink/65">Select a region to view service costs.</aside>;
+    return <aside className="pricing-breakdown-empty">Select a region to view service costs.</aside>;
   }
 
   return (
-    <aside className="rounded-md border border-ink/10 p-4">
-      <div className="mb-4">
-        <h3 className="text-lg font-semibold">{price.region}</h3>
-        <p className="mt-1 text-sm text-ink/65">Service cost breakdown for this region.</p>
+    <aside className="pricing-breakdown">
+      <div className="pricing-breakdown-header">
+        <h3 className="pricing-breakdown-title">{price.region}</h3>
+        <p className="pricing-breakdown-copy">Service cost breakdown for this region.</p>
       </div>
 
       <KeyValue label={`Runtime (${price.currency})`} value={formatAmount(price.runtime_monthly)} />
       <KeyValue label={`Services Total (${price.currency})`} value={formatAmount(price.services_monthly)} />
       <KeyValue label={`Total (${price.currency})`} value={formatAmount(price.total_monthly)} />
-      <div className="mt-4">
+      <div className="section-spacer">
         <button
           type="button"
-          className="flex w-full items-center justify-center rounded-md bg-moss px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-ink disabled:cursor-not-allowed disabled:opacity-60"
+          className="pricing-apply-button"
           onClick={() => onApply(price)}
           disabled={appliedRegion?.region === price.region && appliedRegion.total_monthly === price.total_monthly}
         >
@@ -204,21 +204,21 @@ function RegionServiceBreakdown({
         </button>
       </div>
 
-      <div className="mt-4 space-y-3">
+      <div className="service-list section-spacer">
         {(price.service_breakdown ?? []).length > 0 ? (
           price.service_breakdown?.map((service) => (
-            <div key={`${price.region}-${service.component}`} className="rounded-md bg-cloud p-3">
-              <div className="flex items-start justify-between gap-3">
+            <div key={`${price.region}-${service.component}`} className="service-cost-item">
+              <div className="service-cost-row">
                 <div>
-                  <div className="font-semibold">{service.component}</div>
-                  {service.recommended && <div className="mt-1 text-xs leading-5 text-ink/60">{service.recommended}</div>}
+                  <div className="service-title">{service.component}</div>
+                  {service.recommended && <div className="service-subtitle">{service.recommended}</div>}
                 </div>
-                <div className="text-right font-bold">{formatAmount(service.monthly_cost)}</div>
+                <div className="service-cost">{formatAmount(service.monthly_cost)}</div>
               </div>
             </div>
           ))
         ) : (
-          <div className="rounded-md bg-cloud p-3 text-sm leading-6 text-ink/65">
+          <div className="pricing-empty">
             Per-service rows were not returned for this region. Regenerate the assessment after restarting MCP and bridge so the latest service breakdown response is active.
           </div>
         )}

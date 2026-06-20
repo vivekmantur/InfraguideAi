@@ -29,7 +29,7 @@ export const options = {
 
 export const fieldLabels = {
   repositoryUrl: "GitHub Repository",
-  projectFolder: "Project Folder",
+  projectFolder: "Project ZIP",
   cloud_provider: "Cloud Provider",
   migration_goal: "Migration Goal",
   expected_traffic: "Expected Traffic",

@@ -1,5 +1,5 @@
 import type { Assessment } from "../types";
-import cognineLogoUrl from "../static/image (7).png";
+import cognineLogoUrl from "../static/cognine_title.png";
 import { formatMoney, list } from "./format";
 
 const XML_DECLARATION = '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>';
@@ -16,7 +16,7 @@ type ZipEntry = {
 };
 
 export async function downloadAssessmentWordDocument(assessment: Assessment) {
-  const logoBytes = await imageUrlToBytes(cognineLogoUrl);
+  const logoBytes = await imageUrlToBytes(cognineLogoUrl).catch(() => new Uint8Array());
   const docxBytes = buildDocx(assessment, logoBytes);
   const blob = new Blob([docxBytes], {
     type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
@@ -25,8 +25,11 @@ export async function downloadAssessmentWordDocument(assessment: Assessment) {
   const anchor = document.createElement("a");
   anchor.href = url;
   anchor.download = "infraguide-ai-migration-blueprint.docx";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
   anchor.click();
-  URL.revokeObjectURL(url);
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 async function imageUrlToBytes(url: string) {
@@ -41,11 +44,15 @@ function buildDocx(assessment: Assessment, logoBytes: Uint8Array) {
     textEntry("word/document.xml", documentXml(assessment)),
     textEntry("word/styles.xml", stylesXml()),
     textEntry("word/_rels/document.xml.rels", documentRelationshipsXml()),
-    textEntry("word/header1.xml", headerXml()),
-    textEntry("word/_rels/header1.xml.rels", headerRelationshipsXml()),
+    textEntry("word/header1.xml", headerXml(logoBytes.length > 0)),
     textEntry("word/footer1.xml", footerXml()),
-    { path: "word/media/cognine.png", bytes: logoBytes },
   ];
+  if (logoBytes.length > 0) {
+    entries.push(
+      textEntry("word/_rels/header1.xml.rels", headerRelationshipsXml()),
+      { path: "word/media/cognine.png", bytes: logoBytes },
+    );
+  }
 
   return createZip(entries);
 }
@@ -86,7 +93,17 @@ function headerRelationshipsXml() {
 </Relationships>`;
 }
 
-function headerXml() {
+function headerXml(hasLogo: boolean) {
+  const logoCell = hasLogo
+    ? `<w:tc>
+        <w:tcPr><w:tcW w:w="2160" w:type="dxa"/><w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>
+        ${imageParagraph()}
+      </w:tc>`
+    : `<w:tc>
+        <w:tcPr><w:tcW w:w="2160" w:type="dxa"/><w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>
+        ${paragraph("Cognine", { bold: true, color: "2F5D50", size: 18, align: "right" })}
+      </w:tc>`;
+
   return `${XML_DECLARATION}
 <w:hdr ${WORD_NS}>
   <w:tbl>
@@ -97,10 +114,7 @@ function headerXml() {
         <w:tcPr><w:tcW w:w="7200" w:type="dxa"/><w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>
         ${paragraph("InfraGuide AI Migration Blueprint", { bold: true, color: "2F5D50", size: 18 })}
       </w:tc>
-      <w:tc>
-        <w:tcPr><w:tcW w:w="2160" w:type="dxa"/><w:tcBorders><w:top w:val="nil"/><w:left w:val="nil"/><w:bottom w:val="nil"/><w:right w:val="nil"/></w:tcBorders></w:tcPr>
-        ${imageParagraph()}
-      </w:tc>
+      ${logoCell}
     </w:tr>
   </w:tbl>
 </w:hdr>`;

@@ -1,6 +1,8 @@
 import os
+import io
 import shutil
 import tempfile
+import zipfile
 from pathlib import Path, PurePosixPath
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
@@ -112,6 +114,45 @@ async def create_uploaded_assessment(
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
 
+@app.post("/assessments/upload-zip")
+async def create_zip_assessment(
+    archive: UploadFile = File(...),
+    requirements: str = Form(...),
+    project_name: str = Form("Uploaded project"),
+):
+    filename = archive.filename or "uploaded-project.zip"
+    if not filename.lower().endswith(".zip"):
+        raise HTTPException(status_code=400, detail="Upload a .zip file that contains your project source.")
+
+    try:
+        parsed_requirements = MigrationRequirements.model_validate_json(requirements)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid migration requirements: {exc}") from exc
+
+    content = await archive.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="Uploaded ZIP is empty.")
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail="Uploaded project ZIP is too large for this MVP scan.")
+
+    tmp_dir = Path(tempfile.mkdtemp(prefix="infraguide-zip-"))
+
+    try:
+        saved_files = _extract_project_zip(content, tmp_dir)
+        if saved_files == 0:
+            raise HTTPException(status_code=400, detail="No analyzable files were found after ignoring dependency and build folders.")
+
+        analysis, warnings = analyze_local_repository(
+            tmp_dir,
+            f"Uploaded ZIP: {project_name}",
+            parsed_requirements
+        )
+        request = FolderAssessmentRequest(project_name=project_name, requirements=parsed_requirements)
+        return await build_assessment(request, analysis, warnings)
+    finally:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+
+
 @app.post("/assessments/blueprint", response_class=PlainTextResponse)
 def export_blueprint(request: BlueprintRequest):
     return render_blueprint(request.assessment)
@@ -207,3 +248,39 @@ def _safe_upload_path(filename: str) -> Path | None:
     if not parts:
         return None
     return Path(*parts)
+
+
+def _extract_project_zip(content: bytes, destination_root: Path) -> int:
+    total_uncompressed_bytes = 0
+    saved_files = 0
+
+    try:
+        with zipfile.ZipFile(io.BytesIO(content)) as archive:
+            for entry in archive.infolist():
+                if entry.is_dir():
+                    continue
+
+                relative_path = _safe_upload_path(entry.filename)
+                if relative_path is None:
+                    continue
+
+                total_uncompressed_bytes += entry.file_size
+                if total_uncompressed_bytes > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="Uploaded project ZIP is too large after extraction.")
+
+                destination = destination_root / relative_path
+                resolved_destination = destination.resolve()
+                resolved_root = destination_root.resolve()
+                if resolved_destination != resolved_root and resolved_root not in resolved_destination.parents:
+                    continue
+
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                extracted_content = archive.read(entry)
+                if len(extracted_content) > MAX_UPLOAD_BYTES:
+                    raise HTTPException(status_code=400, detail="Uploaded project ZIP contains a file that is too large.")
+                destination.write_bytes(extracted_content)
+                saved_files += 1
+    except zipfile.BadZipFile as exc:
+        raise HTTPException(status_code=400, detail="Uploaded file is not a valid ZIP archive.") from exc
+
+    return saved_files

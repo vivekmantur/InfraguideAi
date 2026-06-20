@@ -7,6 +7,7 @@ import { KeyValue, List, Panel } from "./common";
 import { RegionalPricingModal } from "./RegionalPricingModal";
 
 export function Report({ assessment, onDownload }: { assessment: Assessment; onDownload: () => void }) {
+  const [activeTab, setActiveTab] = React.useState<"overview" | "cloud" | "plan">("overview");
   const [isPricingModalOpen, setIsPricingModalOpen] = React.useState(false);
   const [appliedRegionalPrice, setAppliedRegionalPrice] = React.useState<RegionalPrice | null>(null);
   const [serviceAvailability, setServiceAvailability] = React.useState<ServiceAvailabilityResult | null>(null);
@@ -85,144 +86,98 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
 
   return (
     <div>
-      <div className="mb-5 flex flex-col gap-3 border-b border-ink/10 pb-5 sm:flex-row sm:items-center sm:justify-between">
+      <div className="report-header">
         <div>
-          <h2 className="text-2xl font-semibold">Migration Blueprint</h2>
-          <p className="mt-1 text-sm text-ink/65">{assessment.architecture_summary}</p>
+          <h2 className="report-title">Migration Blueprint</h2>
+          <p className="report-summary">{assessment.architecture_summary}</p>
         </div>
-        <button onClick={onDownload} className="flex items-center justify-center gap-2 rounded-md border border-moss px-4 py-2 font-semibold text-moss transition hover:bg-moss hover:text-white">
+        <button onClick={onDownload} className="outline-action">
           <ArrowDownToLine size={18} />
           Download
         </button>
       </div>
 
-      <div className="report-card-flow">
-        <Panel title="Technology Stack">
-          <KeyValue label="Languages" value={list(assessment.technology_stack.languages)} />
-          <KeyValue label="Frameworks" value={list(assessment.technology_stack.frameworks)} />
-          <KeyValue label="Runtime" value={list(assessment.technology_stack.runtimes)} />
-          <KeyValue label="Hosting" value={assessment.technology_stack.hosting_model ?? "Not detected"} />
-          <KeyValue label="Deployment" value={assessment.technology_stack.deployment_model ?? "Not detected"} />
-          <KeyValue label="Triggers" value={list(assessment.technology_stack.triggers)} />
-          <KeyValue label="Databases" value={list(assessment.technology_stack.databases)} />
-          <KeyValue label="Containers" value={list(assessment.technology_stack.container_configs)} />
-        </Panel>
-
-        <Panel title="Cloud Readiness">
-          <div className="mb-4 h-3 rounded-full bg-cloud">
-            <div className="h-3 rounded-full bg-signal" style={{ width: `${assessment.cloud_readiness.score}%` }} />
-          </div>
-          <KeyValue label="Score" value={`${assessment.cloud_readiness.score}%`} />
-          <KeyValue label="Complexity" value={assessment.cloud_readiness.complexity} />
-          <KeyValue label="Container" value={assessment.cloud_readiness.container_readiness} />
-          <KeyValue label="Configuration" value={assessment.cloud_readiness.configuration_readiness} />
-          <div className="mt-4">
-            <List items={assessment.cloud_readiness.score_breakdown} />
-          </div>
-        </Panel>
-
-        <Panel title="Recommended Services">
-          <div className="space-y-3">
-            {assessment.recommended_services.map((item) => (
-              <div key={item.component} className="rounded-md bg-cloud p-3">
-                <div className="font-semibold">{item.component}</div>
-                <div className="mt-1 text-sm text-ink/65">{item.current} {"->"} {item.recommended}</div>
-              </div>
-            ))}
-          </div>
-        </Panel>
-
-        <Panel title="Cloud Service Validation">
-          {serviceAvailability ? (
-            <>
-              <KeyValue label="Region" value={serviceAvailability.region} />
-              <KeyValue label="Catalog" value={`${serviceAvailability.catalog_source ?? "catalog"} ${serviceAvailability.catalog_version ?? ""}`.trim()} />
-              <KeyValue label="Region Support" value={serviceAvailability.region_supported ? "Supported" : "Not supported"} />
-              <div className="mt-4">
-                <div className="mb-2 text-sm font-semibold text-ink/70">Available Services</div>
-                <List items={serviceAvailability.available.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
-              </div>
-              {serviceAvailability.unavailable.length > 0 && (
-                <div className="mt-4">
-                  <div className="mb-2 text-sm font-semibold text-ink/70">Needs Review</div>
-                  <List items={serviceAvailability.unavailable.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
-                </div>
-              )}
-              {serviceAvailability.notes.length > 0 && (
-                <div className="mt-4">
-                  <List items={serviceAvailability.notes} />
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-sm leading-6 text-ink/65">{cloudIntelligenceError || "Checking service availability..."}</p>
-          )}
-        </Panel>
-
-        <Panel title="Runtime Compatibility">
-          {runtimeSupport ? (
-            <>
-              <KeyValue label="Target" value={runtimeSupport.target_service} />
-              <KeyValue label="Status" value={runtimeSupport.supported ? "Supported" : "Needs review"} />
-              <KeyValue label="Detected" value={list(runtimeSupport.supported_runtimes)} />
-              {runtimeSupport.unsupported_runtimes.length > 0 && <KeyValue label="Unsupported" value={list(runtimeSupport.unsupported_runtimes)} />}
-              <div className="mt-4">
-                <div className="mb-2 text-sm font-semibold text-ink/70">Catalog Supports</div>
-                <List items={runtimeSupport.catalog_supported_runtimes} />
-              </div>
-              {runtimeSupport.notes.length > 0 && (
-                <div className="mt-4">
-                  <List items={runtimeSupport.notes} />
-                </div>
-              )}
-            </>
-          ) : (
-            <p className="text-sm leading-6 text-ink/65">{cloudIntelligenceError || "Checking runtime compatibility..."}</p>
-          )}
-        </Panel>
-
-        <Panel
-          title="Cost And Strategy"
-          action={
-            <button type="button" className="rounded-md border border-moss px-3 py-1.5 text-sm font-semibold text-moss transition hover:bg-moss hover:text-white disabled:cursor-not-allowed disabled:opacity-50" onClick={() => setIsPricingModalOpen(true)}>
-              Compare and select
-            </button>
-          }
-        >
-          <KeyValue label="Provider" value={assessment.recommended_provider} />
-          <KeyValue label="Strategy" value={assessment.migration_strategy} />
-          <KeyValue label="Location" value={activeRegion} />
-          <KeyValue label="Monthly" value={activeMonthlyValue} />
-          <KeyValue label="Range" value={activeRangeValue} />
-          <KeyValue label="Annual" value={activeAnnualValue} />
-          <div className="mt-4">
-            <List items={activeLineItems} />
-          </div>
-          {activeAssumptions.length > 0 && (
-            <div className="mt-4 rounded-md bg-cloud p-3">
-              <div className="mb-2 text-xs font-bold uppercase text-ink/60">Pricing assumptions</div>
-              <List items={activeAssumptions} />
-            </div>
-          )}
-        </Panel>
-
-        <Panel title="Dependencies">
-          <KeyValue label="Cloud" value={list(assessment.technology_stack.cloud_dependencies)} />
-          <List items={assessment.technology_stack.dependency_graph} />
-        </Panel>
-        <Panel title="Security">
-          <KeyValue label="Risk" value={governance.risk_level} />
-          <List items={[...(governance.passed_checks ?? []), ...(governance.issues ?? []), ...(governance.recommendations ?? [])]} />
-        </Panel>
-        <Panel title="Modernization">
-          <List items={assessment.modernization_opportunities} />
-        </Panel>
-        <Panel title="Roadmap">
-          <List items={assessment.migration_roadmap} numbered />
-        </Panel>
+      <div className="report-tabs" role="tablist" aria-label="Report sections">
+        <button type="button" className={`report-tab ${activeTab === "overview" ? "report-tab-active" : ""}`} onClick={() => setActiveTab("overview")}>Overview</button>
+        <button type="button" className={`report-tab ${activeTab === "cloud" ? "report-tab-active" : ""}`} onClick={() => setActiveTab("cloud")}>Cloud Fit</button>
+        <button type="button" className={`report-tab ${activeTab === "plan" ? "report-tab-active" : ""}`} onClick={() => setActiveTab("plan")}>Migration Plan</button>
       </div>
 
-      {assessment.warnings.length > 0 && <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{assessment.warnings.join(" ")}</div>}
+      <div className="report-tab-content">
+      {activeTab === "overview" && (
+        <div className="report-overview-stack">
+          <div className="overview-metrics">
+            <div className="overview-metric-card">
+              <span>Readiness</span>
+              <strong>{assessment.cloud_readiness.score}%</strong>
+            </div>
+            <div className="overview-metric-card">
+              <span>Provider</span>
+              <strong>{assessment.recommended_provider}</strong>
+            </div>
+            <div className="overview-metric-card">
+              <span>Strategy</span>
+              <strong>{assessment.migration_strategy}</strong>
+            </div>
+          </div>
+          <div className="report-card-grid report-card-grid-summary">
+          <Panel title="Assessment Summary">
+            <p className="summary-narrative">{overviewSummary(assessment, governance.risk_level)}</p>
+          </Panel>
+          <Panel title="Application Snapshot">
+            <KeyValue label="Languages" value={list(assessment.technology_stack.languages)} />
+            <KeyValue label="Frameworks" value={list(assessment.technology_stack.frameworks)} />
+            <KeyValue label="Runtime" value={list(assessment.technology_stack.runtimes)} />
+            <KeyValue label="Database" value={list(assessment.technology_stack.databases)} />
+          </Panel>
+          <Panel title="Migration Direction">
+            <p className="summary-narrative">{migrationDirectionSummary(assessment, activeRegion, activeMonthlyValue)}</p>
+          </Panel>
+          </div>
+        </div>
+      )}
+
+      {activeTab === "cloud" && (
+        <div className="report-card-grid">
+          <TechnologyStackPanel assessment={assessment} />
+          <CloudReadinessPanel assessment={assessment} />
+          <RecommendedServicesPanel assessment={assessment} />
+          <CloudValidationPanel serviceAvailability={serviceAvailability} cloudIntelligenceError={cloudIntelligenceError} />
+          <RuntimeCompatibilityPanel runtimeSupport={runtimeSupport} cloudIntelligenceError={cloudIntelligenceError} />
+          <CostStrategyPanel
+            assessment={assessment}
+            activeRegion={activeRegion}
+            activeMonthlyValue={activeMonthlyValue}
+            activeRangeValue={activeRangeValue}
+            activeAnnualValue={activeAnnualValue}
+            activeLineItems={activeLineItems}
+            activeAssumptions={activeAssumptions}
+            onCompare={() => setIsPricingModalOpen(true)}
+          />
+          <Panel title="Dependencies">
+            <KeyValue label="Cloud" value={list(assessment.technology_stack.cloud_dependencies)} />
+            <List items={assessment.technology_stack.dependency_graph} />
+          </Panel>
+          <Panel title="Security">
+            <KeyValue label="Risk" value={governance.risk_level} />
+            <List items={[...(governance.passed_checks ?? []), ...(governance.issues ?? []), ...(governance.recommendations ?? [])]} />
+          </Panel>
+        </div>
+      )}
+
+      {activeTab === "plan" && (
+        <div className="report-card-grid report-card-grid-wide">
+          <Panel title="Modernization">
+            <List items={assessment.modernization_opportunities} />
+          </Panel>
+          <Panel title="Roadmap">
+            <List items={assessment.migration_roadmap} numbered />
+          </Panel>
+        </div>
+      )}
+
+      {assessment.warnings.length > 0 && <div className="warning-box">{assessment.warnings.join(" ")}</div>}
+      </div>
 
       {isPricingModalOpen && (
         <RegionalPricingModal
@@ -240,6 +195,183 @@ export function Report({ assessment, onDownload }: { assessment: Assessment; onD
       )}
     </div>
   );
+}
+
+function TechnologyStackPanel({ assessment }: { assessment: Assessment }) {
+  return (
+    <Panel title="Technology Stack">
+      <KeyValue label="Languages" value={list(assessment.technology_stack.languages)} />
+      <KeyValue label="Frameworks" value={list(assessment.technology_stack.frameworks)} />
+      <KeyValue label="Runtime" value={list(assessment.technology_stack.runtimes)} />
+      <KeyValue label="Hosting" value={assessment.technology_stack.hosting_model ?? "Not detected"} />
+      <KeyValue label="Deployment" value={assessment.technology_stack.deployment_model ?? "Not detected"} />
+      <KeyValue label="Triggers" value={list(assessment.technology_stack.triggers)} />
+      <KeyValue label="Databases" value={list(assessment.technology_stack.databases)} />
+      <KeyValue label="Containers" value={list(assessment.technology_stack.container_configs)} />
+    </Panel>
+  );
+}
+
+function CloudReadinessPanel({ assessment }: { assessment: Assessment }) {
+  return (
+    <Panel title="Cloud Readiness">
+      <div className="readiness-track">
+        <div className="readiness-bar" style={{ width: `${assessment.cloud_readiness.score}%` }} />
+      </div>
+      <KeyValue label="Score" value={`${assessment.cloud_readiness.score}%`} />
+      <KeyValue label="Complexity" value={assessment.cloud_readiness.complexity} />
+      <KeyValue label="Container" value={assessment.cloud_readiness.container_readiness} />
+      <KeyValue label="Configuration" value={assessment.cloud_readiness.configuration_readiness} />
+      <div className="section-spacer">
+        <List items={assessment.cloud_readiness.score_breakdown} />
+      </div>
+    </Panel>
+  );
+}
+
+function RecommendedServicesPanel({ assessment }: { assessment: Assessment }) {
+  return (
+    <Panel title="Recommended Services">
+      <div className="service-list">
+        {assessment.recommended_services.map((item) => (
+          <div key={item.component} className="service-item">
+            <div className="service-title">{item.component}</div>
+            <div className="service-path">{item.current} {"->"} {item.recommended}</div>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  );
+}
+
+function CloudValidationPanel({
+  serviceAvailability,
+  cloudIntelligenceError,
+}: {
+  serviceAvailability: ServiceAvailabilityResult | null;
+  cloudIntelligenceError: string;
+}) {
+  return (
+    <Panel title="Cloud Service Validation">
+      {serviceAvailability ? (
+        <>
+          <KeyValue label="Region" value={serviceAvailability.region} />
+          <KeyValue label="Catalog" value={`${serviceAvailability.catalog_source ?? "catalog"} ${serviceAvailability.catalog_version ?? ""}`.trim()} />
+          <KeyValue label="Region Support" value={serviceAvailability.region_supported ? "Supported" : "Not supported"} />
+          <div className="section-spacer">
+            <div className="subsection-label">Available Services</div>
+            <List items={serviceAvailability.available.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
+          </div>
+          {serviceAvailability.unavailable.length > 0 && (
+            <div className="section-spacer">
+              <div className="subsection-label">Needs Review</div>
+              <List items={serviceAvailability.unavailable.map((item) => `${item.component ?? item.category}: ${item.service}`)} />
+            </div>
+          )}
+          {serviceAvailability.notes.length > 0 && (
+            <div className="section-spacer">
+              <List items={serviceAvailability.notes} />
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="muted-copy">{cloudIntelligenceError || "Checking service availability..."}</p>
+      )}
+    </Panel>
+  );
+}
+
+function RuntimeCompatibilityPanel({
+  runtimeSupport,
+  cloudIntelligenceError,
+}: {
+  runtimeSupport: RuntimeSupportResult | null;
+  cloudIntelligenceError: string;
+}) {
+  return (
+    <Panel title="Runtime Compatibility">
+      {runtimeSupport ? (
+        <>
+          <KeyValue label="Target" value={runtimeSupport.target_service} />
+          <KeyValue label="Status" value={runtimeSupport.supported ? "Supported" : "Needs review"} />
+          <KeyValue label="Detected" value={list(runtimeSupport.supported_runtimes)} />
+          {runtimeSupport.unsupported_runtimes.length > 0 && <KeyValue label="Unsupported" value={list(runtimeSupport.unsupported_runtimes)} />}
+          <div className="section-spacer">
+            <div className="subsection-label">Catalog Supports</div>
+            <List items={runtimeSupport.catalog_supported_runtimes} />
+          </div>
+          {runtimeSupport.notes.length > 0 && (
+            <div className="section-spacer">
+              <List items={runtimeSupport.notes} />
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="muted-copy">{cloudIntelligenceError || "Checking runtime compatibility..."}</p>
+      )}
+    </Panel>
+  );
+}
+
+function CostStrategyPanel({
+  assessment,
+  activeRegion,
+  activeMonthlyValue,
+  activeRangeValue,
+  activeAnnualValue,
+  activeLineItems,
+  activeAssumptions,
+  onCompare,
+}: {
+  assessment: Assessment;
+  activeRegion: string;
+  activeMonthlyValue: string;
+  activeRangeValue: string;
+  activeAnnualValue: string;
+  activeLineItems?: string[];
+  activeAssumptions: string[];
+  onCompare: () => void;
+}) {
+  return (
+    <Panel
+      title="Cost And Strategy"
+      action={
+        <button type="button" className="small-outline-action" onClick={onCompare}>
+          Compare Regions
+        </button>
+      }
+    >
+      <KeyValue label="Provider" value={assessment.recommended_provider} />
+      <KeyValue label="Strategy" value={assessment.migration_strategy} />
+      <KeyValue label="Location" value={activeRegion} />
+      <KeyValue label="Monthly" value={activeMonthlyValue} />
+      <KeyValue label="Range" value={activeRangeValue} />
+      <KeyValue label="Annual" value={activeAnnualValue} />
+      <div className="section-spacer">
+        <List items={activeLineItems} />
+      </div>
+      {activeAssumptions.length > 0 && (
+        <div className="assumption-box">
+          <div className="assumption-title">Pricing assumptions</div>
+          <List items={activeAssumptions} />
+        </div>
+      )}
+    </Panel>
+  );
+}
+
+function overviewSummary(assessment: Assessment, riskLevel: string) {
+  const stack = [
+    ...(assessment.technology_stack.frameworks ?? []),
+    ...(assessment.technology_stack.runtimes ?? []),
+  ].slice(0, 3).join(", ") || "the detected application stack";
+  const database = list(assessment.technology_stack.databases);
+
+  return `InfraGuide analyzed ${stack} and identified a ${assessment.cloud_readiness.complexity.toLowerCase()} migration profile with ${assessment.cloud_readiness.score}% cloud readiness. The current risk level is ${riskLevel.toLowerCase()}, with ${database === "Not detected" ? "no persistent database dependency detected" : `${database} data dependencies detected`}.`;
+}
+
+function migrationDirectionSummary(assessment: Assessment, activeRegion: string, activeMonthlyValue: string) {
+  return `The recommended direction is ${assessment.migration_strategy} on ${assessment.recommended_provider}, using ${activeRegion} as the current planning region. The baseline monthly estimate is ${activeMonthlyValue}, and detailed service and regional pricing validation are available in Cloud Fit.`;
 }
 
 function defaultRegion(provider: string) {

@@ -17,7 +17,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 9000 &
 BACKEND_PID=$!
 
 cd /app
-python -m http.server 5174 --bind 0.0.0.0 --directory /app/frontend/dist &
+python docker/frontend_server.py &
 FRONTEND_PID=$!
 
 trap 'kill "$MCP_PID" "$BRIDGE_PID" "$BACKEND_PID" "$FRONTEND_PID" 2>/dev/null || true' INT TERM

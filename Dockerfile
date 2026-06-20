@@ -29,8 +29,10 @@ COPY backend backend
 COPY cloud-intelligence-mcp cloud-intelligence-mcp
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 COPY docker/app-start.sh docker/app-start.sh
+COPY docker/frontend_server.py docker/frontend_server.py
 
-RUN chmod +x docker/app-start.sh
+RUN sed -i 's/\r$//' docker/app-start.sh \
+    && chmod +x docker/app-start.sh
 
 EXPOSE 5174 9000 8001 8000
 

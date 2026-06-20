@@ -238,7 +238,7 @@ def _safe_clone_error(message: str, github_token: str | None) -> str:
     if "repository not found" in normalized:
         return "repository was not found. Check the owner, repository name, and access permissions."
     if "timed out" in normalized or "timeout" in normalized:
-        return "repository clone timed out. Try again or upload the project folder directly."
+        return "repository clone timed out. Try again or upload a project ZIP directly."
 
     compact = " ".join(message.split())
     if len(compact) > 240:
