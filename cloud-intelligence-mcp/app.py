@@ -3,8 +3,21 @@ import sys
 import logging
 from pathlib import Path
 
+from mcp.server.fastmcp import FastMCP
+
+from server.tools.cloud_intelligence_tool import (
+    register_cloud_intelligence_tools
+)
+from server.tools.pricing_tool import (
+    register_pricing_tools
+)
 
 def _prefer_project_venv_packages() -> None:
+    """Prefer packages installed in the project virtual environment.
+    
+    Returns:
+        Prefer project venv packages result.
+    """
     project_dir = Path(__file__).resolve().parent
     site_packages = (
         project_dir / ".venv" / "Lib" / "site-packages"
@@ -23,20 +36,10 @@ def _prefer_project_venv_packages() -> None:
     if site_packages_path not in sys.path:
         sys.path.insert(0, site_packages_path)
 
-
 _prefer_project_venv_packages()
 
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-from mcp.server.fastmcp import FastMCP
-
-from server.tools.cloud_intelligence_tool import (
-    register_cloud_intelligence_tools
-)
-from server.tools.pricing_tool import (
-    register_pricing_tools
-)
 
 mcp = FastMCP(
     "cloud-intelligence-mcp"

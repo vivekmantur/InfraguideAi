@@ -1,11 +1,9 @@
 from __future__ import annotations
-
 import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
-
 import boto3
 
 from config import (
@@ -15,7 +13,6 @@ from config import (
     AWS_SECRET_ACCESS_KEY,
     AWS_SESSION_TOKEN,
 )
-
 
 AWS_PRICING_REGIONS = [
     "us-east-1",
@@ -71,19 +68,33 @@ AWS_REGION_USAGE_PREFIXES = {
 HOURS_PER_MONTH = 730
 PROJECT_AWS_DIR = Path(__file__).resolve().parents[3] / ".aws"
 
-
 @dataclass(frozen=True)
 class FargateRates:
+    """AWS Fargate CPU and memory rate pair.
+    
+    """
     vcpu_hourly: float
     memory_gb_hourly: float
 
-
 class AwsPricingClient:
+    """Client for retrieving AWS pricing data.
+    
+    """
     def __init__(self) -> None:
+        """Init.
+        
+        Returns:
+            None.
+        """
         self.client = self._session().client("pricing", region_name=AWS_DEFAULT_REGION or "us-east-1")
         self._fargate_cache: dict[str, FargateRates] = {}
 
     def _session(self) -> boto3.Session:
+        """Session.
+        
+        Returns:
+            Session result.
+        """
         if AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY:
             session_kwargs = {
                 "aws_access_key_id": AWS_ACCESS_KEY_ID,
@@ -120,6 +131,18 @@ class AwsPricingClient:
         limit: int = 10,
         region: str | None = None,
     ) -> dict[str, Any]:
+        """Regional pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Regional pricing result.
+        """
         regions = [region] if region else AWS_PRICING_REGIONS
         rows = [
             self._region_price(
@@ -149,6 +172,17 @@ class AwsPricingClient:
         memory: int,
         services: list[dict[str, Any]],
     ) -> dict[str, Any]:
+        """Region price.
+        
+        Args:
+            region: region value.
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+        
+        Returns:
+            Region price result.
+        """
         rates = self._fargate_rates(region)
         runtime_monthly = round(
             ((cpu * rates.vcpu_hourly) + (memory * rates.memory_gb_hourly)) * HOURS_PER_MONTH,
@@ -173,6 +207,14 @@ class AwsPricingClient:
         }
 
     def _fargate_rates(self, region: str) -> FargateRates:
+        """Fargate rates.
+        
+        Args:
+            region: region value.
+        
+        Returns:
+            Fargate rates result.
+        """
         if region in self._fargate_cache:
             return self._fargate_cache[region]
 
@@ -221,6 +263,15 @@ class AwsPricingClient:
         region: str,
         services: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        """Service breakdown.
+        
+        Args:
+            region: region value.
+            services: services value.
+        
+        Returns:
+            Service breakdown result.
+        """
         breakdown: list[dict[str, Any]] = []
 
         for service in services:
@@ -251,6 +302,16 @@ class AwsPricingClient:
         recommended: str,
         region: str,
     ) -> float:
+        """Service monthly estimate.
+        
+        Args:
+            component: component value.
+            recommended: recommended value.
+            region: region value.
+        
+        Returns:
+            Service monthly estimate result.
+        """
         normalized = f"{component} {recommended}".lower()
 
         if "rds" in normalized or "database" in normalized:
@@ -277,6 +338,14 @@ class AwsPricingClient:
         return 0.0
 
     def _rds_monthly(self, region: str) -> float:
+        """Rds monthly.
+        
+        Args:
+            region: region value.
+        
+        Returns:
+            Rds monthly result.
+        """
         location = AWS_REGION_LOCATIONS[region]
         products = self._get_products(
             "AmazonRDS",
@@ -295,6 +364,14 @@ class AwsPricingClient:
         return round(hourly * HOURS_PER_MONTH, 2)
 
     def _s3_monthly(self, region: str) -> float:
+        """S3 monthly.
+        
+        Args:
+            region: region value.
+        
+        Returns:
+            S3 monthly result.
+        """
         location = AWS_REGION_LOCATIONS[region]
         products = self._get_products(
             "AmazonS3",
@@ -315,6 +392,15 @@ class AwsPricingClient:
         service_code: str,
         filters: list[dict[str, str]],
     ) -> list[dict[str, Any]]:
+        """Get products.
+        
+        Args:
+            service_code: service code value.
+            filters: filters value.
+        
+        Returns:
+            Get products result.
+        """
         products: list[dict[str, Any]] = []
         paginator = self.client.get_paginator("get_products")
 
@@ -333,6 +419,16 @@ class AwsPricingClient:
         predicate,
         default: float | None = None,
     ) -> float:
+        """Find price.
+        
+        Args:
+            products: products value.
+            predicate: predicate value.
+            default: default value.
+        
+        Returns:
+            Find price result.
+        """
         for product in products:
             if not predicate(product):
                 continue
@@ -347,6 +443,14 @@ class AwsPricingClient:
         raise ValueError("AWS Pricing API did not return a matching on-demand price.")
 
     def _on_demand_price(self, product: dict[str, Any]) -> float | None:
+        """On demand price.
+        
+        Args:
+            product: product value.
+        
+        Returns:
+            On demand price result.
+        """
         terms = product.get("terms", {}).get("OnDemand", {})
         for term in terms.values():
             for dimension in term.get("priceDimensions", {}).values():

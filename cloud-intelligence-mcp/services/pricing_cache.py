@@ -15,7 +15,15 @@ except Exception:  # pragma: no cover - optional runtime dependency
 
 class RedisPricingCache:
 
+    """Redis-backed cache for cloud pricing responses.
+    
+    """
     def __init__(self) -> None:
+        """Init.
+        
+        Returns:
+            None.
+        """
         self.redis_url = os.getenv(
             "REDIS_URL",
             "redis://localhost:6379/0"
@@ -44,6 +52,15 @@ class RedisPricingCache:
         payload: Any
     ) -> str:
 
+        """Key.
+        
+        Args:
+            namespace: namespace value.
+            payload: payload value.
+        
+        Returns:
+            Key result.
+        """
         serialized = json.dumps(
             payload,
             sort_keys=True,
@@ -64,6 +81,17 @@ class RedisPricingCache:
         ttl_seconds: int | None = None
     ) -> Any:
 
+        """Get or set.
+        
+        Args:
+            namespace: namespace value.
+            payload: payload value.
+            fetcher: fetcher value.
+            ttl_seconds: ttl seconds value.
+        
+        Returns:
+            Get or set result.
+        """
         if (
             not self.enabled
             or self._disabled
@@ -100,16 +128,17 @@ class RedisPricingCache:
 
         except Exception as ex:
             self._disabled = True
-            print(
-                "Redis pricing cache unavailable; "
-                f"using provider API directly: {ex}"
-            )
             return await fetcher()
 
     async def _get_client(
         self
     ):
 
+        """Get client.
+        
+        Returns:
+            Result produced by get client.
+        """
         if self._client is None:
             self._client = redis_async.from_url(
                 self.redis_url,

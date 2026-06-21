@@ -3,6 +3,15 @@ def select_machine_type(
     memory: int
 ) -> dict:
 
+    """Select a GCP machine type for CPU and memory requirements.
+    
+    Args:
+        cpu: cpu value.
+        memory: memory value.
+    
+    Returns:
+        Select machine type result.
+    """
     if cpu <= 2 and memory <= 8:
         return {
             "machine_type": "e2-medium",

@@ -1,12 +1,12 @@
 import asyncio
-
 import httpx
-
 from services.pricing_cache import pricing_cache
-
 
 class AzurePricingClient:
 
+    """Client for retrieving Azure retail pricing data.
+    
+    """
     BASE_URL = (
         "https://prices.azure.com/api/retail/prices"
     )
@@ -74,6 +74,15 @@ class AzurePricingClient:
         vm_sku: str
     ) -> dict:
 
+        """Get vm price.
+        
+        Args:
+            region: region value.
+            vm_sku: vm sku value.
+        
+        Returns:
+            Get vm price result.
+        """
         filter_query = (
             f"serviceName eq 'Virtual Machines' "
             f"and armRegionName eq '{region}' "
@@ -90,12 +99,6 @@ class AzurePricingClient:
                 f"No pricing found for "
                 f"{vm_sku} in {region}"
             )
-
-        #
-        # Prefer normal Consumption pricing
-        # Ignore Spot, Low Priority,
-        # Reservations, DevTest
-        #
         price_item = next(
             (
                 item
@@ -177,6 +180,17 @@ class AzurePricingClient:
         region: str | None = None
     ) -> dict:
 
+        """Get regional prices.
+        
+        Args:
+            vm_sku: vm sku value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get regional prices result.
+        """
         if region:
             vm_prices = [
                 await self.get_vm_price(
@@ -197,6 +211,14 @@ class AzurePricingClient:
             vm_price: dict
         ) -> dict:
 
+            """Build row.
+            
+            Args:
+                vm_price: vm price value.
+            
+            Returns:
+                Build row result.
+            """
             async with semaphore:
 
                 service_prices = await self.get_service_prices(
@@ -293,6 +315,14 @@ class AzurePricingClient:
         vm_sku: str
     ) -> list[dict]:
 
+        """Get vm prices by region.
+        
+        Args:
+            vm_sku: vm sku value.
+        
+        Returns:
+            Get vm prices by region result.
+        """
         filter_query = (
             f"serviceName eq 'Virtual Machines' "
             f"and armSkuName eq '{vm_sku}'"
@@ -388,6 +418,15 @@ class AzurePricingClient:
         services: list[dict]
     ) -> dict:
 
+        """Get service prices.
+        
+        Args:
+            region: region value.
+            services: services value.
+        
+        Returns:
+            Get service prices result.
+        """
         line_items: list[str] = []
         assumptions: list[str] = []
         items: list[dict] = []
@@ -466,6 +505,14 @@ class AzurePricingClient:
         recommended: str
     ) -> dict | None:
 
+        """Find rule.
+        
+        Args:
+            recommended: recommended value.
+        
+        Returns:
+            Find rule result.
+        """
         for rule in self.SERVICE_RULES:
 
             if rule["match"] in recommended:
@@ -481,6 +528,16 @@ class AzurePricingClient:
         rule: dict
     ) -> dict:
 
+        """Estimate service price.
+        
+        Args:
+            region: region value.
+            recommended: recommended value.
+            rule: rule value.
+        
+        Returns:
+            Estimate service price result.
+        """
         try:
 
             price_item = await self._get_retail_price_item(
@@ -546,6 +603,15 @@ class AzurePricingClient:
         rule: dict
     ) -> dict:
 
+        """Get retail price item.
+        
+        Args:
+            region: region value.
+            rule: rule value.
+        
+        Returns:
+            Get retail price item result.
+        """
         filter_query = (
             f"serviceName eq '{rule['service_name']}' "
             f"and armRegionName eq '{region}'"
@@ -615,6 +681,15 @@ class AzurePricingClient:
         filter_query: str
     ) -> list[dict]:
 
+        """Get all retail items.
+        
+        Args:
+            client: client value.
+            filter_query: filter query value.
+        
+        Returns:
+            Get all retail items result.
+        """
         return await pricing_cache.get_or_set(
             "azure:retail:all_items",
             {
@@ -632,6 +707,15 @@ class AzurePricingClient:
         filter_query: str
     ) -> list[dict]:
 
+        """Fetch all retail items.
+        
+        Args:
+            client: client value.
+            filter_query: filter query value.
+        
+        Returns:
+            Fetch all retail items result.
+        """
         items: list[dict] = []
         next_url = self.BASE_URL
         params = {
@@ -664,6 +748,14 @@ class AzurePricingClient:
         filter_query: str
     ) -> list[dict]:
 
+        """Get retail items.
+        
+        Args:
+            filter_query: filter query value.
+        
+        Returns:
+            Get retail items result.
+        """
         return await pricing_cache.get_or_set(
             "azure:retail:first_page_items",
             {
@@ -679,6 +771,14 @@ class AzurePricingClient:
         filter_query: str
     ) -> list[dict]:
 
+        """Fetch retail items.
+        
+        Args:
+            filter_query: filter query value.
+        
+        Returns:
+            Fetch retail items result.
+        """
         async with httpx.AsyncClient(
             timeout=30
         ) as client:
@@ -704,6 +804,14 @@ class AzurePricingClient:
         item: dict
     ) -> bool:
 
+        """Is primary consumption item.
+        
+        Args:
+            item: item value.
+        
+        Returns:
+            Is primary consumption item result.
+        """
         return (
             item.get("type") == "Consumption"
             and (
@@ -735,6 +843,15 @@ class AzurePricingClient:
         term: str
     ) -> bool:
 
+        """Item contains.
+        
+        Args:
+            item: item value.
+            term: term value.
+        
+        Returns:
+            Item contains result.
+        """
         haystack = " ".join(
             str(
                 item.get(

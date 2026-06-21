@@ -2,18 +2,30 @@ import os
 
 import httpx
 
-
 def _without_none(payload: dict) -> dict:
+    """Return a payload copy without keys whose values are None.
+
+    Args:
+        payload: Request payload that may contain optional values.
+
+    Returns:
+        A dictionary containing only keys with non-None values.
+    """
     return {
         key: value
         for key, value in payload.items()
         if value is not None
     }
 
-
 class CloudMcpClient:
+    """HTTP client for the local cloud intelligence bridge."""
 
     def __init__(self):
+        """Initialize the bridge base URL from environment configuration.
+
+        Returns:
+            None.
+        """
 
         self.base_url = os.getenv(
             "MCP_BRIDGE_URL",
@@ -25,6 +37,15 @@ class CloudMcpClient:
         cpu: int,
         memory: int
     ) -> dict:
+        """Fetch GCP compute pricing for a CPU and memory shape.
+
+        Args:
+            cpu: Requested vCPU count.
+            memory: Requested memory in GB.
+
+        Returns:
+            Pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=120
@@ -47,6 +68,15 @@ class CloudMcpClient:
         cpu: int,
         memory: int
     ) -> dict:
+        """Fetch Azure VM pricing for a CPU and memory shape.
+
+        Args:
+            cpu: Requested vCPU count.
+            memory: Requested memory in GB.
+
+        Returns:
+            Pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=60
@@ -69,6 +99,15 @@ class CloudMcpClient:
         services: list[dict],
         region: str = "us-central1"
     ) -> dict:
+        """Fetch GCP managed service pricing for a region.
+
+        Args:
+            services: Recommended services to price.
+            region: GCP region for the pricing lookup.
+
+        Returns:
+            Managed service pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=120
@@ -94,6 +133,18 @@ class CloudMcpClient:
         limit: int = 10,
         region: str | None = None
     ) -> dict:
+        """Fetch GCP regional runtime and service pricing rows.
+
+        Args:
+            cpu: Requested vCPU count.
+            memory: Requested memory in GB.
+            services: Recommended services to include in regional totals.
+            limit: Maximum number of regions to return.
+            region: Optional single region to price.
+
+        Returns:
+            Regional pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=240
@@ -119,6 +170,15 @@ class CloudMcpClient:
         services: list[dict],
         region: str = "eastus"
     ) -> dict:
+        """Fetch Azure managed service pricing for a region.
+
+        Args:
+            services: Recommended services to price.
+            region: Azure region for the pricing lookup.
+
+        Returns:
+            Managed service pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=60
@@ -144,6 +204,18 @@ class CloudMcpClient:
         limit: int = 10,
         region: str | None = None
     ) -> dict:
+        """Fetch Azure regional runtime and service pricing rows.
+
+        Args:
+            cpu: Requested vCPU count.
+            memory: Requested memory in GB.
+            services: Recommended services to include in regional totals.
+            limit: Maximum number of regions to return.
+            region: Optional single region to price.
+
+        Returns:
+            Regional pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=240
@@ -172,6 +244,18 @@ class CloudMcpClient:
         limit: int = 10,
         region: str | None = None
     ) -> dict:
+        """Fetch AWS regional runtime and service pricing rows.
+
+        Args:
+            cpu: Requested vCPU count.
+            memory: Requested memory in GB.
+            services: Recommended services to include in regional totals.
+            limit: Maximum number of regions to return.
+            region: Optional single region to price.
+
+        Returns:
+            Regional pricing response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=240
@@ -195,6 +279,11 @@ class CloudMcpClient:
     async def health_check_cloud_intelligence(
         self
     ) -> dict:
+        """Check whether the cloud intelligence bridge is reachable.
+
+        Returns:
+            Health response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=15
@@ -214,6 +303,16 @@ class CloudMcpClient:
         region: str,
         services: list[dict]
     ) -> dict:
+        """Check provider service availability for a target region.
+
+        Args:
+            provider: Cloud provider name.
+            region: Cloud region to validate.
+            services: Services that should be checked for availability.
+
+        Returns:
+            Service availability response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=30
@@ -239,6 +338,17 @@ class CloudMcpClient:
         runtimes: list[str],
         frameworks: list[str] | None = None
     ) -> dict:
+        """Check whether a target service supports detected runtimes.
+
+        Args:
+            provider: Cloud provider name.
+            target_service: Recommended runtime service.
+            runtimes: Detected application runtimes.
+            frameworks: Optional detected application frameworks.
+
+        Returns:
+            Runtime support response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=30
@@ -263,6 +373,15 @@ class CloudMcpClient:
         provider: str,
         service: str
     ) -> dict:
+        """Fetch limit metadata for a cloud provider service.
+
+        Args:
+            provider: Cloud provider name.
+            service: Provider service name.
+
+        Returns:
+            Service limits response from the MCP bridge.
+        """
 
         async with httpx.AsyncClient(
             timeout=30

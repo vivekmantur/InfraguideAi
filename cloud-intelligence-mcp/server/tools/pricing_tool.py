@@ -1,5 +1,4 @@
 from config import GCP_API_KEY
-
 from services.azure.pricing_client import AzurePricingClient
 from services.aws.pricing_client import AwsPricingClient
 from services.gcp.pricing_client import GcpPricingClient
@@ -10,7 +9,7 @@ from services.azure.sku_selector import (
 
 if not GCP_API_KEY:
     raise ValueError(
-        "GCP_API_KEY not found in .env"
+        "GCP_API_KEY not found!"
     )
 
 azure_client = AzurePricingClient()
@@ -21,6 +20,14 @@ gcp_client = GcpPricingClient(
 )
 
 def register_pricing_tools(mcp):
+    """Register pricing MCP tools on the server.
+
+    Args:
+        mcp: MCP server instance that receives tool registrations.
+
+    Returns:
+        None.
+    """
 
     @mcp.tool()
     async def get_azure_vm_pricing(
@@ -29,6 +36,16 @@ def register_pricing_tools(mcp):
         region: str = "eastus"
     ) -> dict:
 
+        """Get azure vm pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            region: region value.
+        
+        Returns:
+            Get azure vm pricing result.
+        """
         try:
 
             vm_sku = select_vm_size(
@@ -41,16 +58,9 @@ def register_pricing_tools(mcp):
                 vm_sku
             )
 
-            print("Azure Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("Azure Pricing Error:")
-            print(ex)
-
             return {
                 "provider": "Azure",
                 "error": str(ex)
@@ -62,11 +72,15 @@ def register_pricing_tools(mcp):
         memory: int
     ) -> dict:
 
-        print(
-            f"Pricing request received: "
-            f"cpu={cpu}, memory={memory}"
-        )
-
+        """Get gcp compute pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+        
+        Returns:
+            Get gcp compute pricing result.
+        """
         try:
 
             result = await gcp_client.get_compute_price(
@@ -74,16 +88,9 @@ def register_pricing_tools(mcp):
                 memory
             )
 
-            print("Pricing result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("Pricing error:")
-            print(ex)
-
             return {
                 "provider": "GCP",
                 "error": str(ex)
@@ -95,23 +102,24 @@ def register_pricing_tools(mcp):
         region: str = "us-central1"
     ) -> dict:
 
+        """Return GCP managed service pricing for requested services.
+        
+        Args:
+            services: services value.
+            region: region value.
+        
+        Returns:
+            Get gcp service pricing result.
+        """
         try:
 
             result = await gcp_client.get_service_prices(
                 region,
                 services
             )
-
-            print("GCP Service Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("GCP Service Pricing Error:")
-            print(ex)
-
             return {
                 "provider": "GCP",
                 "error": str(ex)
@@ -123,22 +131,24 @@ def register_pricing_tools(mcp):
         region: str = "eastus"
     ) -> dict:
 
+        """Return Azure managed service pricing for requested services.
+        
+        Args:
+            services: services value.
+            region: region value.
+        
+        Returns:
+            Get azure service pricing result.
+        """
         try:
 
             result = await azure_client.get_service_prices(
                 region,
                 services
             )
-
-            print("Azure Service Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("Azure Service Pricing Error:")
-            print(ex)
 
             return {
                 "provider": "Azure",
@@ -154,6 +164,18 @@ def register_pricing_tools(mcp):
         region: str = None
     ) -> dict:
 
+        """Return Azure regional runtime and service pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get azure regional pricing result.
+        """
         try:
 
             vm_sku = select_vm_size(
@@ -167,17 +189,9 @@ def register_pricing_tools(mcp):
                 limit,
                 region
             )
-
-            print("Azure Regional Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("Azure Regional Pricing Error:")
-            print(ex)
-
             return {
                 "provider": "Azure",
                 "error": str(ex)
@@ -192,6 +206,18 @@ def register_pricing_tools(mcp):
         region: str = None
     ) -> dict:
 
+        """Return GCP regional runtime and service pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get gcp regional pricing result.
+        """
         try:
 
             result = await gcp_client.get_regional_prices(
@@ -202,15 +228,9 @@ def register_pricing_tools(mcp):
                 region
             )
 
-            print("GCP Regional Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("GCP Regional Pricing Error:")
-            print(ex)
 
             return {
                 "provider": "GCP",
@@ -226,6 +246,18 @@ def register_pricing_tools(mcp):
         region: str = None
     ) -> dict:
 
+        """Return AWS regional runtime and service pricing.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get aws regional pricing result.
+        """
         try:
 
             result = await pricing_cache.get_or_set(
@@ -245,22 +277,14 @@ def register_pricing_tools(mcp):
                     region
                 )
             )
-
-            print("AWS Regional Pricing Result:")
-            print(result)
-
             return result
 
         except Exception as ex:
-
-            print("AWS Regional Pricing Error:")
-            print(ex)
 
             return {
                 "provider": "AWS",
                 "error": str(ex)
             }
-
 
 async def _get_aws_regional_pricing(
     cpu: int,
@@ -269,6 +293,18 @@ async def _get_aws_regional_pricing(
     limit: int,
     region: str | None
 ) -> dict:
+    """Get aws regional pricing.
+    
+    Args:
+        cpu: cpu value.
+        memory: memory value.
+        services: services value.
+        limit: limit value.
+        region: region value.
+    
+    Returns:
+        Get aws regional pricing result.
+    """
     return aws_client.regional_pricing(
         cpu=cpu,
         memory=memory,

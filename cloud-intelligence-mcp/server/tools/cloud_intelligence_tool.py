@@ -1,9 +1,7 @@
 import json
 from pathlib import Path
 from typing import Any
-
 from services.pricing_cache import pricing_cache, redis_async
-
 
 CATALOG_DIR = Path(__file__).resolve().parents[2] / "catalogs"
 CATALOG_FILES = {
@@ -13,8 +11,12 @@ CATALOG_FILES = {
 }
 CATALOGS = {}
 
-
 def _load_catalogs() -> dict[str, dict[str, Any]]:
+    """Load catalogs.
+    
+    Returns:
+        Load catalogs result.
+    """
     catalogs: dict[str, dict[str, Any]] = {}
 
     for provider, filename in CATALOG_FILES.items():
@@ -40,8 +42,12 @@ def _load_catalogs() -> dict[str, dict[str, Any]]:
 
     return catalogs
 
-
 def _catalogs() -> dict[str, dict[str, Any]]:
+    """Catalogs.
+    
+    Returns:
+        Catalogs result.
+    """
     global CATALOGS
 
     if not CATALOGS:
@@ -49,11 +55,23 @@ def _catalogs() -> dict[str, dict[str, Any]]:
 
     return CATALOGS
 
-
 def register_cloud_intelligence_tools(mcp):
+    """Register cloud intelligence MCP tools on the server.
+
+    Args:
+        mcp: MCP server instance that receives tool registrations.
+
+    Returns:
+        None.
+    """
 
     @mcp.tool()
     async def health_check_cloud_intelligence() -> dict:
+        """Health check cloud intelligence.
+        
+        Returns:
+            Health check cloud intelligence result.
+        """
         redis_status = "disabled"
         redis_error = None
         catalogs = _catalogs()
@@ -109,6 +127,16 @@ def register_cloud_intelligence_tools(mcp):
         region: str,
         services: list,
     ) -> dict:
+        """Check service availability for a cloud provider and region.
+        
+        Args:
+            provider: provider value.
+            region: region value.
+            services: services value.
+        
+        Returns:
+            Check service availability result.
+        """
         normalized_provider = _provider_name(provider)
         catalogs = _catalogs()
         catalog = catalogs.get(normalized_provider)
@@ -164,6 +192,17 @@ def register_cloud_intelligence_tools(mcp):
         runtimes: list,
         frameworks: list = None,
     ) -> dict:
+        """Check runtime support for a provider service.
+        
+        Args:
+            provider: provider value.
+            target_service: target service value.
+            runtimes: runtimes value.
+            frameworks: frameworks value.
+        
+        Returns:
+            Check runtime support result.
+        """
         normalized_provider = _provider_name(provider)
         catalog = _catalogs().get(normalized_provider, {})
         supported = catalog.get("runtime_support", {}).get(target_service, set())
@@ -194,6 +233,15 @@ def register_cloud_intelligence_tools(mcp):
         provider: str,
         service: str,
     ) -> dict:
+        """Return service limit metadata for a provider service.
+        
+        Args:
+            provider: provider value.
+            service: service value.
+        
+        Returns:
+            Get service limits result.
+        """
         normalized_provider = _provider_name(provider)
         category = _service_category(normalized_provider, service)
         catalog = _catalogs().get(normalized_provider, {})
@@ -211,8 +259,15 @@ def register_cloud_intelligence_tools(mcp):
             else ["No deterministic service limit entry found for this service."],
         }
 
-
 def _provider_name(provider: str) -> str:
+    """Provider name.
+    
+    Args:
+        provider: provider value.
+    
+    Returns:
+        Provider name result.
+    """
     value = provider.strip().lower()
     if value == "aws":
         return "AWS"
@@ -222,8 +277,15 @@ def _provider_name(provider: str) -> str:
         return "GCP"
     return provider
 
-
 def _service_name(service: dict) -> str:
+    """Service name.
+    
+    Args:
+        service: service value.
+    
+    Returns:
+        Service name result.
+    """
     return str(
         service.get("recommended")
         or service.get("service")
@@ -232,8 +294,16 @@ def _service_name(service: dict) -> str:
         or ""
     )
 
-
 def _service_category(provider: str, service: str) -> str:
+    """Service category.
+    
+    Args:
+        provider: provider value.
+        service: service value.
+    
+    Returns:
+        Service category result.
+    """
     catalog = _catalogs().get(provider, {})
     aliases = catalog.get("service_aliases", {})
     lowered = service.strip().lower()
@@ -246,8 +316,15 @@ def _service_category(provider: str, service: str) -> str:
 
     return "unknown"
 
-
 def _runtime_name(runtime: str) -> str:
+    """Runtime name.
+    
+    Args:
+        runtime: runtime value.
+    
+    Returns:
+        Runtime name result.
+    """
     value = runtime.strip().lower()
     if value in {"node.js", "nodejs", "javascript", "typescript"}:
         return "node"

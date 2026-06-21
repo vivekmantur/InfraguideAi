@@ -1,5 +1,4 @@
 from __future__ import annotations
-
 import os
 import json
 import re
@@ -36,7 +35,7 @@ IGNORED_PARTS = {
     "venv",
     "env",
     "__pycache__",
-     ".vs",
+    ".vs",
     ".nuget",
     "packages",
     "artifacts",
@@ -56,8 +55,17 @@ NON_EVIDENCE_FILE_NAMES = {
 if WINDOWS_GIT.exists() and "GIT_PYTHON_GIT_EXECUTABLE" not in os.environ:
     os.environ["GIT_PYTHON_GIT_EXECUTABLE"] = str(WINDOWS_GIT)
 
-
 def analyze_repository(repository_url: str, migration_requirements,github_token: str | None = None) -> tuple[RepositoryAnalysis, list[str]]:
+    """Clone a GitHub repository and analyze its source evidence.
+
+    Args:
+        repository_url: HTTPS repository URL to clone.
+        migration_requirements: User-selected migration requirements used by LLM analysis.
+        github_token: Optional GitHub access token for private repositories.
+
+    Returns:
+        Repository analysis and user-visible warnings produced during scanning.
+    """
     warnings: list[str] = []
     temp_root = Path(__file__).resolve().parents[2] / ".tmp" / "repo-clones"
     temp_root.mkdir(parents=True, exist_ok=True)
@@ -67,10 +75,6 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
         dir=temp_root
     )
 )
-    
-    print("Repository URL:", repository_url)
-    print("Token supplied:", bool(github_token))
-
     try:
         if (
             not (github_token or "").strip()
@@ -88,20 +92,7 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
             ),
             tmp_dir
         )
-        print("CLONE SUCCESSFUL")
-        print("Repository cloned to:", tmp_dir)
         files = list(_iter_repo_files(tmp_dir))
-        # print("BEFORE SUBPROCESS")
-
-        # result = subprocess.run(
-        #     ["git", "config", "--list"],
-        #     capture_output=True,
-        #     text=True
-        # )
-
-        # print("AFTER SUBPROCESS")
-
-        # print(result.stdout)
         detected_files = [str(path.relative_to(tmp_dir)).replace("\\", "/") for path in files]
         evidence = _collect_evidence(files, tmp_dir)
         fallback = _infer_repository_analysis(detected_files, evidence)
@@ -113,14 +104,17 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
         warnings.extend(llm_warnings)
         return _merge_analysis(fallback, analysis), warnings
     except Exception as exc:
-        print("CLONE ERROR:", exc)
         warnings.append(f"Repository clone failed: {_safe_clone_error(str(exc), github_token)}")
         return _empty_analysis(), warnings
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
 
-
 def _non_interactive_git_env() -> dict[str, str]:
+    """Build environment variables that prevent Git from prompting interactively.
+
+    Returns:
+        Environment dictionary for non-interactive Git subprocess calls.
+    """
     env = os.environ.copy()
     env.update(
         {
@@ -132,11 +126,22 @@ def _non_interactive_git_env() -> dict[str, str]:
     )
     return env
 
-
 def _clone_repository(
     repository_url: str,
     destination: Path
 ) -> None:
+    """Clone a repository into the destination path using a shallow checkout.
+
+    Args:
+        repository_url: Repository URL, optionally already token-authenticated.
+        destination: Directory where the repository should be cloned.
+
+    Returns:
+        None.
+
+    Raises:
+        RuntimeError: If git clone exits with a non-zero status.
+    """
     git_executable = (
         str(WINDOWS_GIT)
         if WINDOWS_GIT.exists()
@@ -171,8 +176,15 @@ def _clone_repository(
         )
         raise RuntimeError(message)
 
-
 def _github_repository_needs_token(repository_url: str) -> bool:
+    """Return whether GitHub reports the repository is not publicly accessible.
+
+    Args:
+        repository_url: GitHub repository URL to probe.
+
+    Returns:
+        True when GitHub returns an authentication or not-found response; otherwise False.
+    """
     split = urlsplit(repository_url)
 
     if split.scheme not in {"http", "https"} or split.hostname != "github.com":
@@ -207,8 +219,16 @@ def _github_repository_needs_token(repository_url: str) -> bool:
         404
     }
 
-
 def _authenticated_github_url(repository_url: str, github_token: str | None) -> str:
+    """Inject a GitHub access token into HTTPS clone URLs when supplied.
+
+    Args:
+        repository_url: Original repository URL.
+        github_token: Optional GitHub access token.
+
+    Returns:
+        Token-authenticated clone URL when possible, otherwise the original URL.
+    """
     token = (github_token or "").strip()
     if not token:
         return repository_url
@@ -220,8 +240,16 @@ def _authenticated_github_url(repository_url: str, github_token: str | None) -> 
     netloc = f"x-access-token:{quote(token, safe='')}@{split.netloc}"
     return urlunsplit((split.scheme, netloc, split.path, split.query, split.fragment))
 
-
 def _safe_clone_error(message: str, github_token: str | None) -> str:
+    """Redact and normalize clone errors before exposing them to the API caller.
+
+    Args:
+        message: Raw clone error message.
+        github_token: Optional token that must be redacted if present.
+
+    Returns:
+        Sanitized, compact clone error message.
+    """
     token = (github_token or "").strip()
     if token:
         message = message.replace(token, "<redacted-token>")
@@ -245,12 +273,22 @@ def _safe_clone_error(message: str, github_token: str | None) -> str:
         return f"{compact[:237]}..."
     return compact
 
-
 def analyze_local_repository(root: Path, source_name: str, migration_requirements: MigrationRequirements
 ) -> tuple[RepositoryAnalysis, list[str]]:
+    """Analyze a local project directory and return repository findings.
+
+    Args:
+        root: Root directory of the uploaded or extracted project.
+        source_name: Display name for the source being analyzed.
+        migration_requirements: User-selected migration requirements.
+
+    Returns:
+        Repository analysis and warnings produced during local scanning.
+    """
     warnings: list[str] = []
 
     try:
+        warnings.append(f"Analysis started for {source_name}")
         files = list(_iter_repo_files(root))
         detected_files = [str(path.relative_to(root)).replace("\\", "/") for path in files]
         evidence = _collect_evidence(files, root)
@@ -265,8 +303,15 @@ def analyze_local_repository(root: Path, source_name: str, migration_requirement
         warnings.append(f"Folder analysis failed: {exc}")
         return _empty_analysis(), warnings
 
-
 def _iter_repo_files(root: Path) -> Iterable[Path]:
+    """Yield source files while skipping dependency, build, and IDE folders.
+
+    Args:
+        root: Repository or project root directory.
+
+    Returns:
+        Iterable of file paths that should be considered for analysis.
+    """
     for path in root.rglob("*"):
         if not path.is_file():
             continue
@@ -276,8 +321,16 @@ def _iter_repo_files(root: Path) -> Iterable[Path]:
             continue
         yield path
 
-
 def _collect_evidence(files: list[Path], root: Path) -> list[dict[str, str]]:
+    """Collect bounded, redacted text snippets from the most useful project files.
+
+    Args:
+        files: Candidate repository files.
+        root: Repository or project root directory.
+
+    Returns:
+        List of evidence dictionaries containing relative path and content snippet.
+    """
     evidence: list[dict[str, str]] = []
     total_chars = 0
     SKIP_FILES = {
@@ -290,11 +343,8 @@ def _collect_evidence(files: list[Path], root: Path) -> list[dict[str, str]]:
         "test",
         "docs"
     }
-    
 
     for path in sorted(files, key=_evidence_priority):
-        relative_path = str(path.relative_to(root)).replace("\\", "/")
-
         if path.name.lower() in SKIP_FILES:
             continue
 
@@ -326,8 +376,15 @@ def _collect_evidence(files: list[Path], root: Path) -> list[dict[str, str]]:
 
     return evidence
 
-
 def _evidence_priority(path: Path) -> tuple[int, str]:
+    """Rank files so manifests, config, CI, and source code are sampled first.
+
+    Args:
+        path: Candidate evidence file path.
+
+    Returns:
+        Sort key containing priority bucket and normalized path text.
+    """
     name = path.name.lower()
     path_text = str(path).replace("\\", "/").lower()
 
@@ -343,16 +400,30 @@ def _evidence_priority(path: Path) -> tuple[int, str]:
         return (4, path_text)
     return (9, path_text)
 
-
 def _looks_textual(path: Path) -> bool:
+    """Return whether a file is small enough and likely safe to read as text.
+
+    Args:
+        path: File path to inspect.
+
+    Returns:
+        True when the file can be sampled as text; otherwise False.
+    """
     if path.stat().st_size > 250_000:
         return False
     if path.suffix.lower() in {".png", ".jpg", ".jpeg", ".gif", ".webp", ".ico", ".pdf", ".zip", ".gz", ".7z", ".exe", ".dll"}:
         return False
     return True
 
-
 def _redact_sensitive_values(text: str) -> str:
+    """Mask common secret patterns before evidence is sent to analysis logic.
+
+    Args:
+        text: Source text snippet.
+
+    Returns:
+        Text with common credential and token patterns redacted.
+    """
     redacted = text
     patterns = [
         r"(?i)(api[_-]?key|secret|password|pwd|token|client[_-]?secret|connection[_-]?string)\s*[:=]\s*['\"]?[^'\"\n]+",
@@ -363,14 +434,21 @@ def _redact_sensitive_values(text: str) -> str:
         redacted = re.sub(pattern, lambda match: f"{match.group(1)}=<redacted>", redacted)
     return redacted
 
-
 def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[str, str]]) -> RepositoryAnalysis:
+    """Infer technology stack and architecture signals from filenames and snippets.
+
+    Args:
+        detected_files: Relative file paths discovered in the repository.
+        evidence: Sampled source/config snippets from important files.
+
+    Returns:
+        Deterministic repository analysis built from local signals.
+    """
     paths = [path.replace("\\", "/") for path in detected_files]
     names = {Path(path).name.lower() for path in paths}
     suffixes = {Path(path).suffix.lower() for path in paths}
     evidence_by_path = {item["path"].lower(): item["content"] for item in evidence}
     evidence_text = "\n".join(item["content"] for item in evidence).lower()
-
     languages: list[str] = []
     frameworks: list[str] = []
     runtimes: list[str] = []
@@ -561,11 +639,19 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
         detected_files=detected_files[:80],
     )
 
-
 def _merge_analysis(
     fallback: RepositoryAnalysis,
     analysis: RepositoryAnalysis
 ) -> RepositoryAnalysis:
+    """Merge LLM analysis with deterministic fallback signals.
+
+    Args:
+        fallback: Deterministic repository analysis.
+        analysis: LLM-enhanced repository analysis.
+
+    Returns:
+        Combined repository analysis with fallback values preserved when needed.
+    """
 
     data = analysis.model_dump()
     fallback_data = fallback.model_dump()
@@ -590,15 +676,30 @@ def _merge_analysis(
 
     return RepositoryAnalysis.model_validate(data)
 
-
 def _append_if(items: list[str], condition: bool, value: str) -> None:
+    """Append a value once when the supplied condition is true.
+
+    Args:
+        items: List to mutate.
+        condition: Whether the value should be appended.
+        value: Value to append when it is not already present.
+
+    Returns:
+        None.
+    """
     if condition and value not in items:
         items.append(value)
 
-
 def _dedupe(items: list[str]) -> list[str]:
-    return list(dict.fromkeys(item for item in items if item))
+    """Return non-empty items while preserving first-seen order.
 
+    Args:
+        items: Items to deduplicate.
+
+    Returns:
+        Ordered list of unique non-empty strings.
+    """
+    return list(dict.fromkeys(item for item in items if item))
 
 def _build_dependency_graph(
     frameworks: list[str],
@@ -607,14 +708,34 @@ def _build_dependency_graph(
     cloud_dependencies: list[str],
     external_dependencies: list[str],
 ) -> list[str]:
+    """Build a simple application-to-dependency graph from detected signals.
+
+    Args:
+        frameworks: Detected application frameworks.
+        runtimes: Detected runtime platforms.
+        databases: Detected databases.
+        cloud_dependencies: Detected cloud service dependencies.
+        external_dependencies: Detected third-party dependencies.
+
+    Returns:
+        Dependency graph entries in "Application -> dependency" format.
+    """
     dependency_targets = frameworks + runtimes + databases + cloud_dependencies + external_dependencies
     return [f"Application -> {item}" for item in _dedupe(dependency_targets)]
-
 
 def _sanitize_dependency_graph(
     dependency_graph: list[str],
     package_managers: list[str],
 ) -> list[str]:
+    """Remove package managers from dependency graph entries.
+
+    Args:
+        dependency_graph: Raw dependency graph entries.
+        package_managers: Detected package managers that should not be graph dependencies.
+
+    Returns:
+        Sanitized dependency graph entries.
+    """
     package_manager_names = {item.strip().lower() for item in package_managers}
     sanitized: list[str] = []
 
@@ -626,8 +747,16 @@ def _sanitize_dependency_graph(
 
     return _dedupe(sanitized)
 
-
 def _architecture_pattern(frameworks: list[str], databases: list[str]) -> str:
+    """Classify the broad application architecture from framework and data signals.
+
+    Args:
+        frameworks: Detected application frameworks.
+        databases: Detected databases.
+
+    Returns:
+        Human-readable architecture pattern.
+    """
     if "Azure Functions" in frameworks:
         return "Serverless event-driven application"
     if "Django" in frameworks and databases:
@@ -640,8 +769,15 @@ def _architecture_pattern(frameworks: list[str], databases: list[str]) -> str:
         return "Stateful web/API application"
     return "Web/API application"
 
-
 def _package_json_dependencies(evidence_by_path: dict[str, str]) -> set[str]:
+    """Extract dependency names from sampled package.json files.
+
+    Args:
+        evidence_by_path: Mapping of relative evidence path to sampled content.
+
+    Returns:
+        Lowercase package names declared in package.json files.
+    """
     packages: set[str] = set()
     for path, content in evidence_by_path.items():
         if not path.endswith("package.json"):
@@ -656,8 +792,15 @@ def _package_json_dependencies(evidence_by_path: dict[str, str]) -> set[str]:
                 packages.update(name.lower() for name in values)
     return packages
 
-
 def _python_dependencies(evidence_by_path: dict[str, str]) -> set[str]:
+    """Extract Python dependency names from sampled requirements and pyproject files.
+
+    Args:
+        evidence_by_path: Mapping of relative evidence path to sampled content.
+
+    Returns:
+        Lowercase Python package names.
+    """
     packages: set[str] = set()
     for path, content in evidence_by_path.items():
         if path.endswith("requirements.txt"):
@@ -669,7 +812,6 @@ def _python_dependencies(evidence_by_path: dict[str, str]) -> set[str]:
             packages.update(match.lower() for match in re.findall(r'["\']([A-Za-z0-9_.-]+)[<>=~!;\[]', content))
     return packages
 
-
 def _project_summary(
     application_type: str,
     architecture_pattern: str,
@@ -680,6 +822,21 @@ def _project_summary(
     package_managers: list[str],
     containers: list[str],
 ) -> str:
+    """Compose a short human-readable project summary from detected stack data.
+
+    Args:
+        application_type: Detected application type.
+        architecture_pattern: Detected architecture pattern.
+        languages: Detected programming languages.
+        frameworks: Detected frameworks.
+        runtimes: Detected runtime platforms.
+        databases: Detected databases.
+        package_managers: Detected package managers.
+        containers: Detected container configuration files.
+
+    Returns:
+        One-sentence project summary.
+    """
     stack = _dedupe([*frameworks, *runtimes, *languages])
     parts = [
         f"{application_type} using {_human_list(stack) if stack else 'an undetected application stack'}",
@@ -693,8 +850,18 @@ def _project_summary(
         parts.append(f"including {_human_list(containers)} container configuration")
     return " ".join(parts) + "."
 
-
 def _has_database_signal(database: str, package_names: set[str], python_packages: set[str], evidence_text: str) -> bool:
+    """Return whether package names or text patterns indicate a database dependency.
+
+    Args:
+        database: Database key to check.
+        package_names: Detected JavaScript package names.
+        python_packages: Detected Python package names.
+        evidence_text: Lowercase combined evidence text.
+
+    Returns:
+        True when dependency or text evidence matches the database; otherwise False.
+    """
     signals = {
         "mongodb": {
             "packages": {"mongodb", "mongoose", "pymongo", "motor"},
@@ -722,16 +889,27 @@ def _has_database_signal(database: str, package_names: set[str], python_packages
         return True
     return any(re.search(pattern, evidence_text) for pattern in database_signals["patterns"])
 
-
 def _human_list(items: list[str]) -> str:
+    """Format a list into a compact phrase for blueprint text.
+
+    Args:
+        items: Values to format.
+
+    Returns:
+        Human-readable list phrase or "Not detected".
+    """
     if not items:
         return "Not detected"
     if len(items) == 1:
         return items[0]
     return ", ".join(items[:-1]) + f" and {items[-1]}"
 
-
 def _empty_analysis() -> RepositoryAnalysis:
+    """Return an empty repository analysis used when scanning cannot proceed.
+
+    Returns:
+        Repository analysis populated with unknown or empty values.
+    """
     return RepositoryAnalysis(
         project_summary="Unknown",
         languages=[],

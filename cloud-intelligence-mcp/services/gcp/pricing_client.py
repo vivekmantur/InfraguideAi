@@ -7,9 +7,11 @@ from services.gcp.sku_selector import (
     select_machine_type
 )
 
-
 class GcpPricingClient:
 
+    """Client for retrieving Google Cloud Billing pricing data.
+    
+    """
     BASE_URL = (
         "https://cloudbilling.googleapis.com/v2beta"
     )
@@ -120,6 +122,14 @@ class GcpPricingClient:
         self,
         api_key: str
     ):
+        """Init.
+        
+        Args:
+            api_key: api key value.
+        
+        Returns:
+            None.
+        """
         self.api_key = api_key
         self._compute_service_id: str | None = None
         self._service_id_cache: dict[str, str] = {}
@@ -128,6 +138,11 @@ class GcpPricingClient:
 
     async def get_compute_service_id(self):
 
+        """Get compute service id.
+        
+        Returns:
+            Result produced by get compute service id.
+        """
         if self._compute_service_id:
 
             return self._compute_service_id
@@ -167,12 +182,6 @@ class GcpPricingClient:
                     "services",
                     []
                 )
-
-                print(
-                    f"Loaded "
-                    f"{len(services)} services"
-                )
-
                 for service in services:
 
                     display_name = (
@@ -186,11 +195,6 @@ class GcpPricingClient:
                         "COMPUTE ENGINE"
                         in display_name.upper()
                     ):
-                        print(
-                            "Found Compute Engine:"
-                        )
-                        print(service)
-
                         return (
                             self._set_compute_service_id(
                                 service["name"]
@@ -214,6 +218,14 @@ class GcpPricingClient:
         service_id: str
     ) -> str:
 
+        """Set compute service id.
+        
+        Args:
+            service_id: service id value.
+        
+        Returns:
+            Set compute service id result.
+        """
         self._compute_service_id = service_id
         return service_id
 
@@ -222,6 +234,14 @@ class GcpPricingClient:
         sku_id: str
     ) -> dict:
 
+        """Get sku price.
+        
+        Args:
+            sku_id: sku id value.
+        
+        Returns:
+            Get sku price result.
+        """
         if sku_id in self._sku_price_cache:
 
             return self._sku_price_cache[sku_id]
@@ -368,6 +388,14 @@ class GcpPricingClient:
         sku_id: str
     ) -> dict:
 
+        """Fetch sku price.
+        
+        Args:
+            sku_id: sku id value.
+        
+        Returns:
+            Fetch sku price result.
+        """
         url = (
             f"{self.BASE_URL}/skus/"
             f"{sku_id}/price"
@@ -392,6 +420,14 @@ class GcpPricingClient:
         machine_family: str
     ):
 
+        """Find compute skus.
+        
+        Args:
+            machine_family: machine family value.
+        
+        Returns:
+            Result produced by find compute skus.
+        """
         service_id = await self.get_compute_service_id()
         skus = await self._load_service_skus(service_id)
         core_sku = None
@@ -447,18 +483,21 @@ class GcpPricingClient:
         memory: int
     ):
 
+        """Get compute price.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+        
+        Returns:
+            Result produced by get compute price.
+        """
         machine = (
             select_machine_type(
                 cpu,
                 memory
             )
         )
-
-        print(
-            "Selected machine:"
-        )
-        print(machine)
-
         skus = (
             await self
             .find_compute_skus(
@@ -552,6 +591,18 @@ class GcpPricingClient:
         region: str | None = None
     ) -> dict:
 
+        """Get regional prices.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            services: services value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get regional prices result.
+        """
         compute_prices = await self.get_compute_prices_by_region(
             cpu,
             memory,
@@ -564,6 +615,14 @@ class GcpPricingClient:
             compute_price: dict
         ) -> dict:
 
+            """Build row.
+            
+            Args:
+                compute_price: compute price value.
+            
+            Returns:
+                Build row result.
+            """
             async with semaphore:
 
                 service_prices = await self.get_service_prices(
@@ -666,6 +725,17 @@ class GcpPricingClient:
         region: str | None = None
     ) -> list[dict]:
 
+        """Get compute prices by region.
+        
+        Args:
+            cpu: cpu value.
+            memory: memory value.
+            limit: limit value.
+            region: region value.
+        
+        Returns:
+            Get compute prices by region result.
+        """
         machine = select_machine_type(
             cpu,
             memory
@@ -708,6 +778,15 @@ class GcpPricingClient:
             regional_skus: dict
         ) -> dict | None:
 
+            """Build compute row.
+            
+            Args:
+                region: region value.
+                regional_skus: regional skus value.
+            
+            Returns:
+                Build compute row result.
+            """
             if (
                 "core_sku" not in regional_skus
                 or "ram_sku" not in regional_skus
@@ -849,11 +928,6 @@ class GcpPricingClient:
                 }
                 for region in missing_regions
             )
-
-        print(
-            f"Loaded {len(rows)} regional GCP compute prices"
-        )
-
         ordered_rows = sorted(
             rows,
             key=lambda item: (
@@ -872,6 +946,15 @@ class GcpPricingClient:
         services: list[dict]
     ) -> dict:
 
+        """Get service prices.
+        
+        Args:
+            region: region value.
+            services: services value.
+        
+        Returns:
+            Get service prices result.
+        """
         line_items: list[str] = []
         assumptions: list[str] = []
         items: list[dict] = []
@@ -950,6 +1033,14 @@ class GcpPricingClient:
         recommended: str
     ) -> dict | None:
 
+        """Find rule.
+        
+        Args:
+            recommended: recommended value.
+        
+        Returns:
+            Find rule result.
+        """
         for rule in self.SERVICE_RULES:
 
             if rule["match"] in recommended:
@@ -965,6 +1056,16 @@ class GcpPricingClient:
         rule: dict
     ) -> dict:
 
+        """Estimate service price.
+        
+        Args:
+            region: region value.
+            recommended: recommended value.
+            rule: rule value.
+        
+        Returns:
+            Estimate service price result.
+        """
         try:
 
             sku = await self._find_service_sku(
@@ -1026,6 +1127,15 @@ class GcpPricingClient:
         rule: dict
     ) -> dict:
 
+        """Find service sku.
+        
+        Args:
+            region: region value.
+            rule: rule value.
+        
+        Returns:
+            Find service sku result.
+        """
         service_id = await self._find_service_id(
             rule["service_display_name"]
         )
@@ -1104,6 +1214,14 @@ class GcpPricingClient:
         display_name: str
     ) -> str:
 
+        """Find service id.
+        
+        Args:
+            display_name: display name value.
+        
+        Returns:
+            Find service id result.
+        """
         cache_key = display_name.upper()
 
         if cache_key in self._service_id_cache:
@@ -1152,6 +1270,11 @@ class GcpPricingClient:
         self
     ):
 
+        """Iter services.
+        
+        Returns:
+            Result produced by iter services.
+        """
         for service in await self._load_services():
             yield service
 
@@ -1159,6 +1282,11 @@ class GcpPricingClient:
         self
     ) -> list[dict]:
 
+        """Load services.
+        
+        Returns:
+            Load services result.
+        """
         return await pricing_cache.get_or_set(
             "gcp:services",
             {
@@ -1171,6 +1299,11 @@ class GcpPricingClient:
         self
     ) -> list[dict]:
 
+        """Fetch services.
+        
+        Returns:
+            Fetch services result.
+        """
         url = (
             f"{self.BASE_URL}/services"
         )
@@ -1220,6 +1353,14 @@ class GcpPricingClient:
         service_id: str
     ) -> list[dict]:
 
+        """Load service skus.
+        
+        Args:
+            service_id: service id value.
+        
+        Returns:
+            Load service skus result.
+        """
         if service_id in self._service_skus_cache:
 
             return self._service_skus_cache[service_id]
@@ -1242,6 +1383,14 @@ class GcpPricingClient:
         service_id: str
     ) -> list[dict]:
 
+        """Fetch service skus.
+        
+        Args:
+            service_id: service id value.
+        
+        Returns:
+            Fetch service skus result.
+        """
         url = (
             f"{self.BASE_URL}/skus"
         )
@@ -1293,6 +1442,15 @@ class GcpPricingClient:
         region: str
     ) -> bool:
 
+        """Sku matches region.
+        
+        Args:
+            sku: sku value.
+            region: region value.
+        
+        Returns:
+            Sku matches region result.
+        """
         service_regions = self._sku_regions(
             sku
         )
@@ -1308,6 +1466,14 @@ class GcpPricingClient:
         sku: dict
     ) -> list[str]:
 
+        """Sku regions.
+        
+        Args:
+            sku: sku value.
+        
+        Returns:
+            Sku regions result.
+        """
         service_regions = sku.get(
             "serviceRegions",
             []
@@ -1411,6 +1577,15 @@ class GcpPricingClient:
         machine_family: str
     ) -> str | None:
 
+        """Compute sku kind.
+        
+        Args:
+            sku: sku value.
+            machine_family: machine family value.
+        
+        Returns:
+            Compute sku kind result.
+        """
         display_name = (
             sku.get(
                 "displayName",
@@ -1471,6 +1646,15 @@ class GcpPricingClient:
         term: str
     ) -> bool:
 
+        """Sku contains.
+        
+        Args:
+            sku: sku value.
+            term: term value.
+        
+        Returns:
+            Sku contains result.
+        """
         haystack = " ".join(
             str(
                 sku.get(
@@ -1494,6 +1678,15 @@ class GcpPricingClient:
         region: str
     ) -> tuple[int, str]:
 
+        """Service sku rank.
+        
+        Args:
+            sku: sku value.
+            region: region value.
+        
+        Returns:
+            Service sku rank result.
+        """
         regions = self._sku_regions(
             sku
         )

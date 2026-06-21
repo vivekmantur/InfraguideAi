@@ -1,6 +1,7 @@
 .env
 .aws/
 .venv/
+venv/
 __pycache__/
 *.pyc
 .pytest_cache/
@@ -16,3 +17,9 @@ tmp/
 reports/
 infraguide-ai-preview.png
 *.log
+**/__pycache__/
+**/*.pyc
+**/.venv/
+**/venv/
+**/*.egg-info/
+**/*.tsbuildinfo

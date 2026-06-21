@@ -1,9 +1,20 @@
+import json
 import os
 import sys
 from pathlib import Path
 
+from fastapi import FastAPI, Request
+from mcp import ClientSession
+from mcp.client.streamable_http import (
+    streamablehttp_client
+)
 
 def _prefer_project_venv_packages() -> None:
+    """Prefer packages installed in the project virtual environment.
+    
+    Returns:
+        Prefer project venv packages result.
+    """
     project_dir = Path(__file__).resolve().parent
     site_packages = (
         project_dir / ".venv" / "Lib" / "site-packages"
@@ -25,14 +36,6 @@ def _prefer_project_venv_packages() -> None:
 
 _prefer_project_venv_packages()
 
-from fastapi import FastAPI, Request
-from mcp import ClientSession
-from mcp.client.streamable_http import (
-    streamablehttp_client
-)
-
-import json
-
 app = FastAPI()
 
 MCP_SERVER_URL = os.getenv(
@@ -40,11 +43,19 @@ MCP_SERVER_URL = os.getenv(
     "http://127.0.0.1:8000/mcp"
 )
 
-
 async def call_mcp_tool(
     tool_name: str,
     arguments: dict | None = None
 ) -> dict:
+    """Call an MCP tool through the configured bridge process.
+    
+    Args:
+        tool_name: tool name value.
+        arguments: arguments value.
+    
+    Returns:
+        Call mcp tool result.
+    """
     clean_arguments = {
         key: value
         for key, value in (arguments or {}).items()
@@ -88,8 +99,6 @@ async def call_mcp_tool(
                     return json.loads(text)
 
                 except Exception as ex:
-                    print("Raw MCP error/text response:")
-                    print(text)
                     return {
                         "error": text,
                         "parse_error": str(ex),
@@ -100,13 +109,21 @@ async def call_mcp_tool(
                     f"No content returned from MCP tool {tool_name}"
             }
 
-
 @app.middleware("http")
 async def log_bridge_errors(
     request: Request,
     call_next
 ):
 
+    """Log bridge errors and return an HTTP error response.
+    
+    Args:
+        request: request value.
+        call_next: call next value.
+    
+    Returns:
+        Result produced by log bridge errors.
+    """
     try:
 
         return await call_next(
@@ -114,20 +131,21 @@ async def log_bridge_errors(
         )
 
     except Exception as ex:
-
-        print(
-            f"Bridge API error for "
-            f"{request.method} {request.url.path}:"
-        )
-        print(ex)
         raise
-
 
 @app.post("/pricing/gcp")
 async def get_gcp_pricing(
     payload: dict
 ):
 
+    """Return GCP compute pricing for the requested shape.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get gcp pricing.
+    """
     cpu = payload["cpu"]
     memory = payload["memory"]
 
@@ -155,13 +173,6 @@ async def get_gcp_pricing(
                     "memory": memory
                 }
             )
-
-            print("MCP Result:")
-            print(result)
-
-            # -----------------------------
-            # Case 1 : Structured response
-            # -----------------------------
             if getattr(
                 result,
                 "structuredContent",
@@ -169,9 +180,6 @@ async def get_gcp_pricing(
             ):
                 return result.structuredContent
 
-            # -----------------------------
-            # Case 2 : Text response
-            # -----------------------------
             if (
                 result.content
                 and len(result.content) > 0
@@ -179,19 +187,10 @@ async def get_gcp_pricing(
 
                 text = result.content[0].text
 
-                print("Raw MCP Text:")
-                print(text)
-
                 try:
                     return json.loads(text)
 
                 except Exception as ex:
-
-                    print(
-                        "JSON Parse Error:"
-                    )
-                    print(ex)
-
                     return {
                         "error":
                             f"Unable to parse MCP response: {str(ex)}"
@@ -202,12 +201,19 @@ async def get_gcp_pricing(
                     "No content returned from MCP"
             }
 
-
 @app.post("/pricing/gcp/services")
 async def get_gcp_service_pricing(
     payload: dict
 ):
 
+    """Return GCP managed service pricing for requested services.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get gcp service pricing.
+    """
     services = payload.get(
         "services",
         []
@@ -239,10 +245,6 @@ async def get_gcp_service_pricing(
                     "region": region
                 }
             )
-
-            print("GCP Service MCP Result:")
-            print(result)
-
             if getattr(
                 result,
                 "structuredContent",
@@ -272,12 +274,19 @@ async def get_gcp_service_pricing(
                     "No content returned from GCP service MCP"
             }
 
-
 @app.post("/pricing/gcp/regions")
 async def get_gcp_regional_pricing(
     payload: dict
 ):
 
+    """Return GCP regional runtime and service pricing.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get gcp regional pricing.
+    """
     return await call_mcp_tool(
         "get_gcp_regional_pricing",
         {
@@ -296,12 +305,20 @@ async def get_gcp_regional_pricing(
             )
         }
     )
-            
+
 @app.post("/pricing/azure")
 async def get_azure_pricing(
     payload: dict
 ):
 
+    """Return Azure VM pricing for the requested shape.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get azure pricing.
+    """
     cpu = payload["cpu"]
     memory = payload["memory"]
 
@@ -327,12 +344,6 @@ async def get_azure_pricing(
                     "memory": memory
                 }
             )
-
-            print("Azure MCP Result:")
-            print(result)
-
-            # MCP SDK returns content not structuredContent
-
             if result.content:
 
                 import json
@@ -359,6 +370,14 @@ async def get_azure_service_pricing(
     payload: dict
 ):
 
+    """Return Azure managed service pricing for requested services.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get azure service pricing.
+    """
     services = payload.get(
         "services",
         []
@@ -390,10 +409,6 @@ async def get_azure_service_pricing(
                     "region": region
                 }
             )
-
-            print("Azure Service MCP Result:")
-            print(result)
-
             if result.content:
 
                 text = result.content[0].text
@@ -412,12 +427,19 @@ async def get_azure_service_pricing(
                     "No content returned from Azure service MCP"
             }
 
-
 @app.post("/pricing/azure/regions")
 async def get_azure_regional_pricing(
     payload: dict
 ):
 
+    """Return Azure regional runtime and service pricing.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get azure regional pricing.
+    """
     return await call_mcp_tool(
         "get_azure_regional_pricing",
         {
@@ -437,12 +459,19 @@ async def get_azure_regional_pricing(
         }
     )
 
-
 @app.post("/pricing/aws/regions")
 async def get_aws_regional_pricing(
     payload: dict
 ):
 
+    """Return AWS regional runtime and service pricing.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get aws regional pricing.
+    """
     return await call_mcp_tool(
         "get_aws_regional_pricing",
         {
@@ -462,18 +491,29 @@ async def get_aws_regional_pricing(
         }
     )
 
-
 @app.get("/cloud-intelligence/health")
 async def cloud_intelligence_health():
+    """Return cloud intelligence health information.
+    
+    Returns:
+        Result produced by cloud intelligence health.
+    """
     return await call_mcp_tool(
         "health_check_cloud_intelligence"
     )
-
 
 @app.post("/cloud-intelligence/service-availability")
 async def check_service_availability(
     payload: dict
 ):
+    """Check service availability for a cloud provider and region.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by check service availability.
+    """
     return await call_mcp_tool(
         "check_service_availability",
         {
@@ -486,11 +526,18 @@ async def check_service_availability(
         }
     )
 
-
 @app.post("/cloud-intelligence/runtime-support")
 async def check_runtime_support(
     payload: dict
 ):
+    """Check runtime support for a provider service.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by check runtime support.
+    """
     return await call_mcp_tool(
         "check_runtime_support",
         {
@@ -507,11 +554,18 @@ async def check_runtime_support(
         }
     )
 
-
 @app.post("/cloud-intelligence/service-limits")
 async def get_service_limits(
     payload: dict
 ):
+    """Return service limit metadata for a provider service.
+    
+    Args:
+        payload: payload value.
+    
+    Returns:
+        Result produced by get service limits.
+    """
     return await call_mcp_tool(
         "get_service_limits",
         {

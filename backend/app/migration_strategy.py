@@ -5,11 +5,19 @@ from .models import (
     StrategyAssessment
 )
 
-
 def determine_migration_strategy(
     goal: MigrationGoal,
     analysis: RepositoryAnalysis
 ) -> MigrationStrategyResult:
+    """Score migration strategies from user goals and repository evidence.
+
+    Args:
+        goal: User-selected migration goal.
+        analysis: Repository analysis containing detected stack and dependency signals.
+
+    Returns:
+        Recommended migration strategy with confidence and supporting reasons.
+    """
 
     scores = {
         "Rehost": 0,
@@ -19,11 +27,6 @@ def determine_migration_strategy(
     }
 
     reasons: list[str] = []
-
-    # --------------------------------------------------
-    # User Goal
-    # --------------------------------------------------
-
     if goal == MigrationGoal.lift_shift:
         scores["Rehost"] += 20
         reasons.append(
@@ -57,10 +60,6 @@ def determine_migration_strategy(
             "Performance Improvement goal selected."
         )
 
-    # --------------------------------------------------
-    # Runtime Analysis
-    # --------------------------------------------------
-
     runtimes = [runtime.lower() for runtime in analysis.runtimes]
 
     if any(".net framework" in runtime for runtime in runtimes):
@@ -81,19 +80,11 @@ def determine_migration_strategy(
             "Node.js runtime detected."
         )
 
-    # --------------------------------------------------
-    # Containers
-    # --------------------------------------------------
-
     if analysis.container_configs:
         scores["Containerize"] += 20
         reasons.append(
             "Container configuration detected."
         )
-
-    # --------------------------------------------------
-    # CI/CD
-    # --------------------------------------------------
 
     if analysis.cicd_configs:
         scores["Containerize"] += 5
@@ -102,19 +93,11 @@ def determine_migration_strategy(
             "CI/CD pipeline detected."
         )
 
-    # --------------------------------------------------
-    # Database
-    # --------------------------------------------------
-
     if analysis.databases:
         scores["Replatform"] += 5
         reasons.append(
             "Database dependency detected."
         )
-
-    # --------------------------------------------------
-    # Stateful Services
-    # --------------------------------------------------
 
     if analysis.stateful_services:
         scores["Replatform"] += 5
@@ -122,29 +105,16 @@ def determine_migration_strategy(
             "Stateful services detected."
         )
 
-    # --------------------------------------------------
-    # Cloud Dependencies
-    # --------------------------------------------------
-
     if analysis.cloud_dependencies:
         scores["Replatform"] += 10
         reasons.append(
             "Cloud services already detected."
         )
-
-    # --------------------------------------------------
-    # Governance
-    # --------------------------------------------------
-
     if analysis.governance_findings:
         scores["Refactor"] += 5
         reasons.append(
             "Governance issues identified."
         )
-
-    # --------------------------------------------------
-    # Determine Winner
-    # --------------------------------------------------
 
     strategy = max(
         scores,
@@ -170,6 +140,15 @@ def assess_strategy_alignment(
     user_goal: MigrationGoal,
     strategy_result: MigrationStrategyResult
 ) -> StrategyAssessment:
+    """Compare the selected migration goal with the recommended strategy.
+
+    Args:
+        user_goal: User-selected migration goal.
+        strategy_result: Strategy recommendation generated from repository evidence.
+
+    Returns:
+        Assessment describing whether the recommendation aligns with the user goal.
+    """
 
     goal_mapping = {
         MigrationGoal.lift_shift: "Rehost",

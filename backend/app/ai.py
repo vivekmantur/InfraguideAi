@@ -1,14 +1,11 @@
 from __future__ import annotations
-
 import json
 import re
 from typing import Any
-
 import httpx
 
-from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_API_KEY_2, GROQ_ENDPOINT
+from .core.settings import DEFAULT_MODEL, GROQ_API_KEY, GROQ_API_KEY_FALLBACK, GROQ_ENDPOINT
 from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, GovernanceAssessment, MigrationRequirements, RepositoryAnalysis, ServiceRecommendation,MigrationStrategyResult
-
 
 AWS_PRICING_REGIONS = [
     "us-east-1",
@@ -26,7 +23,6 @@ AWS_PRICING_REGIONS = [
     "ap-southeast-2",
     "ap-northeast-1",
 ]
-
 
 REQUIREMENT_INTERPRETATION_RULES = """
 Requirement interpretation rules:
@@ -51,19 +47,35 @@ Requirement interpretation rules:
   - Flexible: modernization-first plan, broader hardening, deeper refactor/optimization options.
 """
 
-
 def groq_model() -> str:
+    """Return the configured Groq model name.
+
+    Returns:
+        Model identifier used for Groq chat completion requests.
+    """
     return DEFAULT_MODEL
 
-
 def is_groq_configured() -> bool:
-    return bool(_groq_api_keys())
+    """Return whether at least one Groq API key is configured.
 
+    Returns:
+        True when one or more Groq API keys are available; otherwise False.
+    """
+    return bool(_groq_api_keys())
 
 def analyze_repository_evidence(
     fallback: RepositoryAnalysis,
     requirements: MigrationRequirements
 ) -> tuple[RepositoryAnalysis, list[str]]:
+    """Enhance deterministic repository findings with Groq analysis when available.
+
+    Args:
+        fallback: Deterministic repository analysis.
+        requirements: User-selected migration requirements.
+
+    Returns:
+        Enhanced repository analysis and warnings from the LLM analysis path.
+    """
     warnings: list[str] = []
 
     if not is_groq_configured():
@@ -147,10 +159,6 @@ Return JSON:
   }}
 }}
 """
-
-    print("Prompt size:", len(prompt))
-    print(json.dumps(fallback.model_dump(), indent=2))
-
     raw = _chat_completion(
         [
             {
@@ -169,19 +177,10 @@ Return JSON:
         label="repository-analysis",
     )
 
-    print("LLM Content:", raw)
-
     try:
         data = _load_json_object(raw)       
 
-        print("PARSED JSON")
-        print(json.dumps(data, indent=2))
-
         if not data:
-            print(
-                "LLM repository analysis returned an empty response. "
-                "Using local repository analysis."
-            )
             return fallback, warnings
 
         merged = fallback.model_copy(deep=True)
@@ -217,6 +216,20 @@ def generate_architect_reasoning(
     strategy: MigrationStrategyResult,
     requirements_profile: dict[str, Any] | None = None
 ) -> str:
+    """Generate executive migration reasoning, with deterministic fallback text.
+
+    Args:
+        analysis: Repository analysis for the application.
+        provider: Selected cloud provider.
+        services: Recommended cloud services as dictionaries.
+        cost: Cost estimate payload.
+        roadmap: Migration roadmap steps.
+        strategy: Recommended migration strategy result.
+        requirements_profile: Optional normalized requirement profile.
+
+    Returns:
+        Architect-style reasoning text.
+    """
     fallback = _fallback_reasoning(analysis, provider)
     if not is_groq_configured():
         return fallback
@@ -290,7 +303,6 @@ Requirements:
         temperature=0.25,
     )
 
-
 def generate_service_recommendations(
     analysis: RepositoryAnalysis,
     requirements: MigrationRequirements,
@@ -299,6 +311,19 @@ def generate_service_recommendations(
     fallback_services: list[ServiceRecommendation],
     requirements_profile: dict[str, Any] | None = None,
 ) -> tuple[list[ServiceRecommendation], list[str]]:
+    """Ask the LLM for provider service mappings and validate the returned rows.
+
+    Args:
+        analysis: Repository analysis for the application.
+        requirements: User-selected migration requirements.
+        provider: Selected cloud provider.
+        strategy: Recommended migration strategy result.
+        fallback_services: Rule-based service recommendations.
+        requirements_profile: Optional normalized requirement profile.
+
+    Returns:
+        Validated service recommendations and warnings from the LLM path.
+    """
     warnings: list[str] = []
 
     if not is_groq_configured():
@@ -382,7 +407,6 @@ Rules:
 - Return 3-8 services.
 - Do not use markdown.
 """
-
     raw = _chat_completion(
         [
             {
@@ -440,7 +464,6 @@ Rules:
         )
         return fallback_services, warnings
 
-
 def generate_migration_guidance(
     analysis: RepositoryAnalysis,
     requirements: MigrationRequirements,
@@ -452,6 +475,22 @@ def generate_migration_guidance(
     fallback_roadmap: list[str],
     requirements_profile: dict[str, Any] | None = None,
 ) -> tuple[GovernanceAssessment, list[str], list[str], list[str]]:
+    """Generate governance, modernization, and roadmap guidance from repository evidence.
+
+    Args:
+        analysis: Repository analysis for the application.
+        requirements: User-selected migration requirements.
+        provider: Selected cloud provider.
+        strategy: Recommended migration strategy result.
+        services: Recommended service mappings.
+        fallback_governance: Rule-based governance assessment.
+        fallback_opportunities: Rule-based modernization opportunities.
+        fallback_roadmap: Rule-based migration roadmap.
+        requirements_profile: Optional normalized requirement profile.
+
+    Returns:
+        Governance assessment, modernization opportunities, roadmap steps, and warnings.
+    """
     warnings: list[str] = []
     security_signals = {
         "governance_findings_from_repository": analysis.governance_findings,
@@ -618,8 +657,17 @@ Rules:
         )
         return fallback_governance, fallback_opportunities, fallback_roadmap, warnings
 
-
 def answer_migration_question(assessment: AssessmentResponse, message: str, history: list[ChatMessage]) -> str:
+    """Answer a follow-up migration question using the generated assessment context.
+
+    Args:
+        assessment: Existing migration assessment.
+        message: User question.
+        history: Prior chat messages for conversational context.
+
+    Returns:
+        Assistant answer generated by Groq or a configuration fallback message.
+    """
     fallback = "Groq is not configured yet. Add GROQ_API_KEY on the backend to enable the AI migration assistant."
     if not is_groq_configured():
         return fallback
@@ -639,13 +687,23 @@ def answer_migration_question(assessment: AssessmentResponse, message: str, hist
     messages.append({"role": "user", "content": message})
     return _chat(messages, fallback=fallback, temperature=0.35)
 
-
 def generate_aws_pricing_estimate(
     analysis: RepositoryAnalysis,
     requirements: MigrationRequirements,
     services: list[dict[str, str]],
     cloud_sizing: CloudSizingRequirements,
 ) -> tuple[dict[str, Any] | None, list[str]]:
+    """Generate AWS regional pricing estimates when live AWS pricing is unavailable.
+
+    Args:
+        analysis: Repository analysis for the application.
+        requirements: User-selected migration requirements.
+        services: Recommended service mappings.
+        cloud_sizing: Sizing assumptions for runtime and services.
+
+    Returns:
+        AWS pricing payload when generated successfully, plus warnings.
+    """
     warnings: list[str] = []
 
     if not is_groq_configured():
@@ -776,8 +834,17 @@ Return strict JSON only in this shape:
 
     return data, warnings
 
-
 def _chat(messages: list[dict[str, str]], fallback: str, temperature: float) -> str:
+    """Send a short-form chat request to Groq with standard token settings.
+
+    Args:
+        messages: Chat completion messages.
+        fallback: Text to return when Groq is unavailable or fails.
+        temperature: Sampling temperature for the model.
+
+    Returns:
+        Model response text or the fallback text.
+    """
     return _chat_completion(
         messages,
         fallback=fallback,
@@ -787,7 +854,6 @@ def _chat(messages: list[dict[str, str]], fallback: str, temperature: float) -> 
         label="chat",
     )
 
-
 def _chat_completion(
     messages: list[dict[str, str]],
     fallback: str,
@@ -796,6 +862,19 @@ def _chat_completion(
     response_format: dict[str, str] | None,
     label: str = "chat",
 ) -> str:
+    """Call Groq chat completions across configured keys and return fallback on failure.
+
+    Args:
+        messages: Chat completion messages.
+        fallback: Text to return when all configured keys fail.
+        temperature: Sampling temperature for the model.
+        max_tokens: Maximum response tokens.
+        response_format: Optional response format payload for JSON-mode calls.
+        label: Log label identifying the call site.
+
+    Returns:
+        Model response text or the fallback text.
+    """
     api_keys = _groq_api_keys()
     if not api_keys:
         return fallback
@@ -809,17 +888,7 @@ def _chat_completion(
     if response_format:
         payload["response_format"] = response_format
 
-    for index, api_key in enumerate(api_keys, start=1):
-        key_label = "primary" if index == 1 else f"fallback-{index}"
-
-        print(
-            "Calling Groq:",
-            f"label={label}",
-            f"key={key_label}",
-            f"model={payload.get('model')}",
-            f"endpoint={GROQ_ENDPOINT}",
-        )
-
+    for api_key in api_keys:
         try:
             with httpx.Client(timeout=90) as client:
                 response = client.post(
@@ -831,69 +900,56 @@ def _chat_completion(
                 data = response.json()
                 content = data["choices"][0]["message"]["content"].strip()
                 if not content:
-                    print(
-                        "Groq returned an empty message content.",
-                        f"label={label}",
-                        f"key={key_label}",
-                        f"model={payload.get('model')}",
-                        f"endpoint={GROQ_ENDPOINT}",
-                    )
                     continue
 
-                print(
-                    "Groq response received:",
-                    f"label={label}",
-                    f"key={key_label}",
-                    f"chars={len(content)}",
-                    f"preview={_safe_preview(content)}",
-                )
                 return content
-        except httpx.HTTPStatusError as exc:
-            response_text = exc.response.text if exc.response is not None else ""
-            print(
-                "Groq API request failed:",
-                f"label={label}",
-                f"key={key_label}",
-                f"status={exc.response.status_code if exc.response is not None else 'unknown'}",
-                f"model={payload.get('model')}",
-                f"endpoint={GROQ_ENDPOINT}",
-                f"response={_safe_preview(response_text)}",
-            )
-        except Exception as exc:
-            print(
-                "Groq API request failed:",
-                f"label={label}",
-                f"key={key_label}",
-                f"type={type(exc).__name__}",
-                f"model={payload.get('model')}",
-                f"endpoint={GROQ_ENDPOINT}",
-                f"error={exc}",
-            )
+        
+        except httpx.HTTPStatusError:
+            continue
+        except Exception:
+            continue
 
-    print(
-        "All configured Groq keys failed. Returning fallback.",
-        f"label={label}",
-        f"configured_keys={len(api_keys)}",
-    )
     return fallback
 
-
 def _groq_api_keys() -> list[str]:
+    """Return configured Groq API keys in priority order without duplicates.
+
+    Returns:
+        Ordered list of unique Groq API keys.
+    """
     keys: list[str] = []
-    for api_key in (GROQ_API_KEY, GROQ_API_KEY_2):
+    for api_key in (GROQ_API_KEY, GROQ_API_KEY_FALLBACK):
         if api_key and api_key not in keys:
             keys.append(api_key)
     return keys
 
-
 def _json_payload(content: str) -> str:
+    """Extract raw JSON from a response that may be wrapped in a markdown fence.
+
+    Args:
+        content: Raw model response content.
+
+    Returns:
+        JSON payload text with markdown fences removed when present.
+    """
     fenced = re.search(r"```(?:json)?\s*(.*?)```", content, flags=re.DOTALL | re.IGNORECASE)
     if fenced:
         return fenced.group(1).strip()
     return content.strip()
 
-
 def _load_json_object(content: str) -> dict[str, Any]:
+    """Parse an LLM response into a JSON object, tolerating leading prose.
+
+    Args:
+        content: Raw model response content.
+
+    Returns:
+        Parsed JSON object.
+
+    Raises:
+        ValueError: If the parsed JSON value is not an object.
+        json.JSONDecodeError: If no JSON object can be parsed.
+    """
     payload = _json_payload(content)
     try:
         data = json.loads(payload)
@@ -908,46 +964,41 @@ def _load_json_object(content: str) -> dict[str, Any]:
         raise ValueError("LLM response JSON must be an object.")
     return data
 
-
 def _string_list(value: Any) -> list[str]:
+    """Normalize a JSON value into a list of non-empty strings.
+
+    Args:
+        value: JSON value that may contain strings.
+
+    Returns:
+        List of stripped non-empty strings.
+    """
     if not isinstance(value, list):
         return []
     return [item.strip() for item in value if isinstance(item, str) and item.strip()]
 
-
 def _safe_preview(content: str) -> str:
+    """Compact response text for safe logging and warning messages.
+
+    Args:
+        content: Text to compact.
+
+    Returns:
+        First 180 characters of whitespace-normalized text.
+    """
     compact = " ".join(content.split())
     return compact[:180]
 
-
-def _empty_repository_analysis(detected_files: list[str]) -> RepositoryAnalysis:
-    return RepositoryAnalysis(
-        project_summary="Unknown",
-        languages=[],
-        frameworks=[],
-        runtimes=[],
-        hosting_model="Unknown",
-        deployment_model="Unknown",
-        triggers=[],
-        databases=[],
-        package_managers=[],
-        container_configs=[],
-        infrastructure_configs=[],
-        cicd_configs=[],
-        external_dependencies=[],
-        cloud_dependencies=[],
-        dependency_graph=[],
-        architecture_pattern="Unknown",
-        application_type="Unknown",
-        stateful_services=[],
-        storage_dependencies=[],
-        network_requirements=[],
-        governance_findings=[],
-        detected_files=detected_files[:80],
-    )
-
-
 def _fallback_reasoning(analysis: RepositoryAnalysis, provider: str) -> str:
+    """Create deterministic architect reasoning when Groq is unavailable.
+
+    Args:
+        analysis: Repository analysis for the application.
+        provider: Selected cloud provider.
+
+    Returns:
+        Short fallback reasoning paragraph.
+    """
     stack = ", ".join(analysis.frameworks or analysis.languages) or "the detected application stack"
     database = ", ".join(analysis.databases) or "no confirmed database dependency"
     return (
