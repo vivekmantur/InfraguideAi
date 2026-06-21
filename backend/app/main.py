@@ -22,6 +22,9 @@ app.include_router(cloud_intelligence_router)
 def health() -> dict[str, str]:
     """Return API health status.
 
+    Args:
+        None.
+
     Returns:
         A small dictionary indicating that the API is reachable.
     """

@@ -23,6 +23,9 @@ class CloudMcpClient:
     def __init__(self):
         """Initialize the bridge base URL from environment configuration.
 
+        Args:
+            None.
+
         Returns:
             None.
         """
@@ -280,6 +283,9 @@ class CloudMcpClient:
         self
     ) -> dict:
         """Check whether the cloud intelligence bridge is reachable.
+
+        Args:
+            None.
 
         Returns:
             Health response from the MCP bridge.

@@ -6,7 +6,14 @@ router = APIRouter(tags=["cloud-intelligence"])
 
 @router.post("/pricing/regions")
 async def regional_pricing(payload: dict):
-    """Return regional pricing estimates for the selected cloud provider."""
+    """Return regional pricing estimates for the selected cloud provider.
+
+    Args:
+        payload: Pricing request with provider, sizing, services, and region filters.
+
+    Returns:
+        Regional pricing rows from the MCP bridge.
+    """
     provider = payload.get("provider")
     cpu = int(payload.get("cpu", 2))
     memory = int(payload.get("memory", 4))
@@ -29,7 +36,14 @@ async def regional_pricing(payload: dict):
 
 @router.get("/cloud-intelligence/health")
 async def cloud_intelligence_health():
-    """Proxy a health check to the cloud intelligence bridge service."""
+    """Proxy a health check to the cloud intelligence bridge service.
+
+    Args:
+        None.
+
+    Returns:
+        Health response from the MCP bridge.
+    """
     mcp_client = CloudMcpClient()
 
     try:
@@ -39,7 +53,14 @@ async def cloud_intelligence_health():
 
 @router.post("/cloud-intelligence/service-availability")
 async def service_availability(payload: dict):
-    """Validate whether recommended services are available in a region."""
+    """Validate whether recommended services are available in a region.
+
+    Args:
+        payload: Availability request with provider, region, and services.
+
+    Returns:
+        Service availability validation response from the MCP bridge.
+    """
     mcp_client = CloudMcpClient()
 
     try:
@@ -55,7 +76,14 @@ async def service_availability(payload: dict):
 
 @router.post("/cloud-intelligence/runtime-support")
 async def runtime_support(payload: dict):
-    """Check runtime and framework support for a target cloud service."""
+    """Check runtime and framework support for a target cloud service.
+
+    Args:
+        payload: Runtime support request with provider, service, runtimes, and frameworks.
+
+    Returns:
+        Runtime support response from the MCP bridge.
+    """
     mcp_client = CloudMcpClient()
 
     try:
@@ -72,7 +100,14 @@ async def runtime_support(payload: dict):
 
 @router.post("/cloud-intelligence/service-limits")
 async def service_limits(payload: dict):
-    """Return service limit metadata for a provider service."""
+    """Return service limit metadata for a provider service.
+
+    Args:
+        payload: Service limit request with provider and service name.
+
+    Returns:
+        Service limit metadata from the MCP bridge.
+    """
     mcp_client = CloudMcpClient()
 
     try:

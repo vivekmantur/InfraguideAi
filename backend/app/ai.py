@@ -50,6 +50,9 @@ Requirement interpretation rules:
 def groq_model() -> str:
     """Return the configured Groq model name.
 
+    Args:
+        None.
+
     Returns:
         Model identifier used for Groq chat completion requests.
     """
@@ -57,6 +60,9 @@ def groq_model() -> str:
 
 def is_groq_configured() -> bool:
     """Return whether at least one Groq API key is configured.
+
+    Args:
+        None.
 
     Returns:
         True when one or more Groq API keys are available; otherwise False.
@@ -913,6 +919,9 @@ def _chat_completion(
 
 def _groq_api_keys() -> list[str]:
     """Return configured Groq API keys in priority order without duplicates.
+
+    Args:
+        None.
 
     Returns:
         Ordered list of unique Groq API keys.

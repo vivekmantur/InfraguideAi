@@ -15,9 +15,22 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "redis>=5.0.0",
     "boto3>=1.35.90",
-    "fastapi>=0.116.0",
-    "uvicorn>=0.35.0"
+    "fastapi==0.115.6",
+    "uvicorn[standard]==0.34.0"
 ]
 
 [tool.setuptools.packages.find]
-include = ["cloud_intelligence_mcp*"]
+where = ["."]
+include = [
+    "models*",
+    "server*",
+    "services*"
+]
+namespaces = true
+
+[tool.setuptools]
+py-modules = [
+    "app",
+    "bridge_api",
+    "config"
+]

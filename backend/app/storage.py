@@ -13,6 +13,9 @@ AUDIT_LOG = DATA_DIR / "audit.log"
 def utc_now() -> str:
     """Return the current UTC timestamp.
 
+    Args:
+        None.
+
     Returns:
         Current UTC time in ISO 8601 format.
     """
@@ -41,6 +44,9 @@ def save_assessment(assessment: AssessmentResponse) -> AssessmentResponse:
 
 def list_assessments() -> list[AssessmentSummary]:
     """Return saved assessment summaries ordered by newest first.
+
+    Args:
+        None.
 
     Returns:
         A list of compact assessment summaries.

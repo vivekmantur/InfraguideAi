@@ -46,7 +46,14 @@ PROJECT_SOURCE_FILES = {
 }
 
 def safe_upload_path(filename: str) -> Path | None:
-    """Normalize an uploaded path and reject dependency, build, or unsafe paths."""
+    """Normalize an uploaded path and reject unsafe paths.
+
+    Args:
+        filename: Raw filename or path from the uploaded file entry.
+
+    Returns:
+        Safe relative path, or None when the entry should be skipped.
+    """
     ignored_parts = {"", ".", "..", ".git", "node_modules", "vendor", "bin", "obj", "dist", "build", ".venv", "venv", "env", "__pycache__"}
     parts = list(PurePosixPath(filename.replace("\\", "/")).parts)
     if any(part in ignored_parts for part in parts):
@@ -57,7 +64,15 @@ def safe_upload_path(filename: str) -> Path | None:
     return Path(*parts)
 
 def extract_project_zip(content: bytes, destination_root: Path) -> tuple[int, int]:
-    """Extract analyzable ZIP entries into a temporary project directory."""
+    """Extract analyzable ZIP entries into a project directory.
+
+    Args:
+        content: Uploaded ZIP file bytes.
+        destination_root: Directory where accepted files should be written.
+
+    Returns:
+        Tuple containing saved file count and detected project source count.
+    """
     total_uncompressed_bytes = 0
     saved_files = 0
     project_files = 0
@@ -96,7 +111,14 @@ def extract_project_zip(content: bytes, destination_root: Path) -> tuple[int, in
     return saved_files, project_files
 
 def is_project_source_path(path: Path) -> bool:
-    """Return whether a path looks like application source or project metadata."""
+    """Check whether a path looks like application source.
+
+    Args:
+        path: Relative path from an uploaded project.
+
+    Returns:
+        True when the file looks like source code or project metadata.
+    """
     name = path.name.lower()
     suffix = path.suffix.lower()
     return name in PROJECT_SOURCE_FILES or suffix in PROJECT_SOURCE_SUFFIXES

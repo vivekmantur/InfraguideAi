@@ -20,13 +20,12 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY backend/requirements.txt backend/requirements.txt
-COPY cloud-intelligence-mcp/requirements.txt cloud-intelligence-mcp/requirements.txt
+COPY cloud-intelligence-mcp cloud-intelligence-mcp
 
-RUN pip install --no-cache-dir -r cloud-intelligence-mcp/requirements.txt \
+RUN pip install --no-cache-dir ./cloud-intelligence-mcp \
     && pip install --no-cache-dir -r backend/requirements.txt
 
 COPY backend backend
-COPY cloud-intelligence-mcp cloud-intelligence-mcp
 COPY --from=frontend-build /app/frontend/dist frontend/dist
 COPY docker/app-start.sh docker/app-start.sh
 COPY docker/frontend_server.py docker/frontend_server.py

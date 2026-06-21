@@ -15,7 +15,14 @@ router = APIRouter(tags=["assessments"])
 
 @router.post("/assessments")
 async def create_assessment(request: AssessmentRequest):
-    """Analyze a GitHub repository and build a migration assessment."""
+    """Analyze a GitHub repository and build a migration assessment.
+
+    Args:
+        request: Assessment request containing repository URL and migration inputs.
+
+    Returns:
+        Complete migration assessment response.
+    """
     analysis, warnings = analyze_repository(
         str(request.repository_url),
         request.requirements,
@@ -35,7 +42,16 @@ async def create_uploaded_assessment(
     requirements: str = Form(...),
     project_name: str = Form("Uploaded folder"),
 ):
-    """Analyze uploaded project files and return a migration assessment."""
+    """Analyze uploaded project files and return a migration assessment.
+
+    Args:
+        files: Uploaded project files from the browser.
+        requirements: JSON migration requirements submitted with the upload.
+        project_name: Display name for the uploaded project.
+
+    Returns:
+        Complete migration assessment response.
+    """
     if not files:
         raise HTTPException(status_code=400, detail="Upload at least one project file.")
 
@@ -84,7 +100,16 @@ async def create_zip_assessment(
     requirements: str = Form(...),
     project_name: str = Form("Uploaded project"),
 ):
-    """Extract an uploaded project ZIP and generate a migration assessment."""
+    """Extract an uploaded project ZIP and generate a migration assessment.
+
+    Args:
+        archive: Uploaded ZIP archive containing project source files.
+        requirements: JSON migration requirements submitted with the upload.
+        project_name: Display name for the uploaded project.
+
+    Returns:
+        Complete migration assessment response.
+    """
     filename = archive.filename or "uploaded-project.zip"
     if not filename.lower().endswith(".zip"):
         raise HTTPException(status_code=400, detail="Upload a .zip file that contains your project source.")
@@ -128,5 +153,12 @@ async def create_zip_assessment(
 
 @router.post("/assessments/blueprint", response_class=PlainTextResponse)
 def export_blueprint(request: BlueprintRequest):
-    """Render an assessment as a downloadable Markdown blueprint."""
+    """Render an assessment as a downloadable Markdown blueprint.
+
+    Args:
+        request: Blueprint export request containing the assessment.
+
+    Returns:
+        Markdown blueprint text.
+    """
     return render_blueprint(request.assessment)

@@ -112,6 +112,9 @@ def analyze_repository(repository_url: str, migration_requirements,github_token:
 def _non_interactive_git_env() -> dict[str, str]:
     """Build environment variables that prevent Git from prompting interactively.
 
+    Args:
+        None.
+
     Returns:
         Environment dictionary for non-interactive Git subprocess calls.
     """
@@ -906,6 +909,9 @@ def _human_list(items: list[str]) -> str:
 
 def _empty_analysis() -> RepositoryAnalysis:
     """Return an empty repository analysis used when scanning cannot proceed.
+
+    Args:
+        None.
 
     Returns:
         Repository analysis populated with unknown or empty values.

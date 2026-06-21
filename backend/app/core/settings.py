@@ -40,7 +40,14 @@ if GROQ_API_KEY_FALLBACK.startswith("os.getenv("):
     GROQ_API_KEY_FALLBACK = ""
 
 def get_cors_origins() -> list[str]:
-    """Return allowed CORS origins from environment configuration."""
+    """Return allowed CORS origins from environment configuration.
+
+    Args:
+        None.
+
+    Returns:
+        Configured CORS origins, or default local development origins.
+    """
     configured_origins = os.getenv("CORS_ORIGINS", "")
     origins = [origin.strip() for origin in configured_origins.split(",") if origin.strip()]
     return origins or DEFAULT_CORS_ORIGINS
