@@ -1,9 +1,32 @@
 import React from "react";
-import { FolderOpen, GitBranch, Loader2, ServerCog, Sparkles, Trash2, X,RotateCcw } from "lucide-react";
+import {
+  BarChart3,
+  Calendar,
+  CalendarDays,
+  CheckCircle2,
+  CircleDollarSign,
+  DollarSign,
+  FolderOpen,
+  Github,
+  GitBranch,
+  Gauge,
+  Loader2,
+  Rocket,
+  Scale,
+  ServerCog,
+  Sparkles,
+  Timer,
+  Trash2,
+  Upload,
+  Wrench,
+  X,
+  Zap,
+  RotateCcw,
+} from "lucide-react";
 import { responseErrorMessage, submitGithubAssessment, submitZipAssessment } from "./api/assessments";
-import { FieldError, RequiredLabel, Select } from "./components/common";
+import { FieldError, RequiredLabel } from "./components/common";
 import { Report } from "./components/Report";
-import { emptyRequirements, fieldLabels, MAX_UPLOAD_BYTES, options, requiredFieldMessage } from "./constants";
+import { emptyRequirements, fieldLabels, MAX_UPLOAD_BYTES, requiredFieldMessage } from "./constants";
 import cognineLogo from "./static/cognine_title.png";
 import type { Assessment, FieldErrors, Requirements, SourceMode } from "./types";
 import { hasRepositoryCloneFailure, needsGithubAccessToken, repositoryCloneFailureMessage } from "./utils/assessment";
@@ -44,6 +67,141 @@ function isZipFile(file: File) {
 
 function projectNameFromArchive(filename: string) {
   return filename.replace(/\.zip$/i, "").trim() || "Uploaded project";
+}
+
+type ChoiceOption = {
+  value: string;
+  label: string;
+  description?: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  tone: "blue" | "teal" | "orange" | "violet" | "red" | "slate" | "green";
+};
+
+function AwsLogo() {
+  return (
+    <span className="provider-brand-logo aws-logo" aria-hidden="true">
+      <span>aws</span>
+      <i />
+    </span>
+  );
+}
+
+function AzureLogo() {
+  return (
+    <span className="provider-brand-logo azure-logo" aria-hidden="true">
+      <i />
+    </span>
+  );
+}
+
+function GcpLogo() {
+  return (
+    <span className="provider-brand-logo gcp-logo" aria-hidden="true">
+      <i />
+    </span>
+  );
+}
+
+function TrafficSignal({ level = "medium" }: { level?: "low" | "medium" | "high" }) {
+  const activeBars = level === "low" ? 1 : level === "medium" ? 3 : 4;
+
+  return (
+    <span className={`traffic-signal traffic-signal-${level}`} aria-hidden="true">
+      {[1, 2, 3, 4].map((bar) => (
+        <i key={bar} className={bar <= activeBars ? "traffic-bar-active" : ""} />
+      ))}
+    </span>
+  );
+}
+
+const providerOptions: ChoiceOption[] = [
+  { value: "AWS", label: "AWS", icon: AwsLogo, tone: "orange" },
+  { value: "Azure", label: "Azure", icon: AzureLogo, tone: "blue" },
+  { value: "GCP", label: "Google Cloud", icon: GcpLogo, tone: "green" },
+];
+
+const migrationGoalOptions: ChoiceOption[] = [
+  { value: "Cost Optimization", label: "Cost Optimize", description: "Reduce and control spend", icon: CircleDollarSign, tone: "green" },
+  { value: "Application Modernization", label: "Modernize", description: "Build for cloud native", icon: Rocket, tone: "violet" },
+  { value: "Lift-and-Shift", label: "Rehost", description: "Move with minimal change", icon: ServerCog, tone: "blue" },
+  { value: "Scalability", label: "Scale", description: "Autoscale and grow", icon: BarChart3, tone: "teal" },
+  { value: "Performance Improvement", label: "Refactor", description: "Optimize and improve", icon: Wrench, tone: "slate" },
+];
+
+const trafficOptions: ChoiceOption[] = [
+  { value: "Low", label: "Low", icon: (props) => <TrafficSignal {...props} level="low" />, tone: "green" },
+  { value: "Medium", label: "Medium", icon: (props) => <TrafficSignal {...props} level="medium" />, tone: "orange" },
+  { value: "High", label: "High", icon: (props) => <TrafficSignal {...props} level="high" />, tone: "red" },
+];
+
+const budgetOptions: ChoiceOption[] = [
+  { value: "Low Cost", label: "Cost Optimized", icon: DollarSign, tone: "green" },
+  { value: "Balanced", label: "Balanced", icon: Scale, tone: "violet" },
+  { value: "Performance Focused", label: "Performance First", icon: Gauge, tone: "red" },
+];
+
+const timelineOptions: ChoiceOption[] = [
+  { value: "Immediate", label: "Immediate", icon: Zap, tone: "green" },
+  { value: "3 Months", label: "3 Months", icon: CalendarDays, tone: "blue" },
+  { value: "6 Months", label: "6 Months", icon: Calendar, tone: "slate" },
+  { value: "Flexible", label: "Flexible", icon: Timer, tone: "slate" },
+];
+
+function ChoiceCard({
+  option,
+  selected,
+  onSelect,
+}: {
+  option: ChoiceOption;
+  selected: boolean;
+  onSelect: (value: string) => void;
+}) {
+  const Icon = option.icon;
+
+  return (
+    <button type="button" className={`choice-card choice-card-${option.tone} ${selected ? "choice-card-selected" : ""}`} onClick={() => onSelect(option.value)} aria-pressed={selected}>
+      <span className="choice-icon">
+        <Icon size={18} />
+      </span>
+      <span className="choice-copy">
+        <span className="choice-label">{option.label}</span>
+        {option.description && <span className="choice-description">{option.description}</span>}
+      </span>
+      {selected && (
+        <span className="choice-check" aria-hidden="true">
+          <CheckCircle2 size={16} />
+        </span>
+      )}
+    </button>
+  );
+}
+
+function ChoiceGroup({
+  label,
+  options,
+  value,
+  error,
+  onChange,
+  columns = 3,
+}: {
+  label: string;
+  options: ChoiceOption[];
+  value: string;
+  error?: string;
+  onChange: (value: string) => void;
+  columns?: 3 | 4 | 5;
+}) {
+  return (
+    <div className="choice-group">
+      <RequiredLabel>{label}</RequiredLabel>
+      <div className={`choice-grid choice-grid-${columns} ${error ? "choice-grid-error" : ""}`}>
+        {options.map((option) => (
+          <ChoiceCard key={option.value} option={option} selected={value === option.value} onSelect={onChange} />
+        ))}
+      </div>
+      {error && <FieldError message={error} />}
+    </div>
+  );
 }
 
 export function App() {
@@ -498,9 +656,11 @@ export function App() {
             <form onSubmit={submitAssessment} className="modal-migration-form">
               <div className="source-tabs">
                 <button type="button" className={`source-tab ${sourceMode === "github" ? "source-tab-active" : ""}`} onClick={() => switchSourceMode("github")}>
+                  <Github size={17} />
                   GitHub URL
                 </button>
                 <button type="button" className={`source-tab ${sourceMode === "folder" ? "source-tab-active" : ""}`} onClick={() => switchSourceMode("folder")}>
+                  <Upload size={17} />
                   Upload ZIP
                 </button>
               </div>
@@ -563,18 +723,25 @@ export function App() {
                 </label>
               )}
 
-              <div className="requirements-grid modal-requirements-grid">
-                <Select label="Cloud Provider" value={requirements.cloud_provider} values={options.cloud_provider} placeholder="Select cloud provider" error={fieldErrors.cloud_provider} onChange={(value) => updateRequirement("cloud_provider", value)} />
-                <Select label="Migration Goal" value={requirements.migration_goal} values={options.migration_goal} placeholder="Select migration goal" error={fieldErrors.migration_goal} onChange={(value) => updateRequirement("migration_goal", value)} />
-                <Select label="Expected Traffic" value={requirements.expected_traffic} values={options.expected_traffic} placeholder="Select expected traffic" error={fieldErrors.expected_traffic} onChange={(value) => updateRequirement("expected_traffic", value)} />
-                <Select label="Budget Preference" value={requirements.budget_preference} values={options.budget_preference} placeholder="Select budget preference" error={fieldErrors.budget_preference} onChange={(value) => updateRequirement("budget_preference", value)} />
-                <Select label="Migration Timeline" value={requirements.migration_timeline} values={options.migration_timeline} placeholder="Select migration timeline" error={fieldErrors.migration_timeline} onChange={(value) => updateRequirement("migration_timeline", value)} />
+              <div className="profile-builder">
+                <ChoiceGroup label="Cloud Provider" options={providerOptions} value={requirements.cloud_provider} error={fieldErrors.cloud_provider} onChange={(value) => updateRequirement("cloud_provider", value)} columns={3} />
+                <ChoiceGroup label="Migration Goal" options={migrationGoalOptions} value={requirements.migration_goal} error={fieldErrors.migration_goal} onChange={(value) => updateRequirement("migration_goal", value)} columns={5} />
+                <div className="profile-row">
+                  <ChoiceGroup label="Expected Traffic" options={trafficOptions} value={requirements.expected_traffic} error={fieldErrors.expected_traffic} onChange={(value) => updateRequirement("expected_traffic", value)} columns={3} />
+                  <ChoiceGroup label="Budget Preference" options={budgetOptions} value={requirements.budget_preference} error={fieldErrors.budget_preference} onChange={(value) => updateRequirement("budget_preference", value)} columns={3} />
+                </div>
+                <ChoiceGroup label="Migration Timeline" options={timelineOptions} value={requirements.migration_timeline} error={fieldErrors.migration_timeline} onChange={(value) => updateRequirement("migration_timeline", value)} columns={4} />
               </div>
 
-              <button className="primary-action" disabled={isLoading}>
-                {isLoading ? <Loader2 className="animate-spin" size={18} /> : <ServerCog size={18} />}
-                Generate Blueprint
-              </button>
+              <div className="migration-modal-footer">
+                <button type="button" className="secondary-action modal-cancel-action" onClick={closeMigrationModal}>
+                  Cancel
+                </button>
+                <button className="primary-action modal-generate-action" disabled={isLoading}>
+                  {isLoading ? <Loader2 className="animate-spin" size={18} /> : <ServerCog size={18} />}
+                  Generate Blueprint
+                </button>
+              </div>
             </form>
           </section>
         </div>

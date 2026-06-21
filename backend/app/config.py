@@ -20,3 +20,13 @@ if DEFAULT_MODEL.startswith("os.getenv("):
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
 if GROQ_API_KEY.startswith("os.getenv("):
     GROQ_API_KEY = ""
+
+GROQ_API_KEY_2 = (
+    os.getenv("GROQ_API_KEY_2")
+    or os.getenv("GROQ_API2")
+    or os.getenv("GROQ_API_KEY_SECONDARY")
+    or ""
+)
+GROQ_API_KEY_2 = GROQ_API_KEY_2.strip().strip('"').strip("'")
+if GROQ_API_KEY_2.startswith("os.getenv("):
+    GROQ_API_KEY_2 = ""

@@ -6,7 +6,7 @@ from typing import Any
 
 import httpx
 
-from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_ENDPOINT
+from .config import DEFAULT_MODEL, GROQ_API_KEY, GROQ_API_KEY_2, GROQ_ENDPOINT
 from .models import AssessmentResponse, ChatMessage, CloudSizingRequirements, GovernanceAssessment, MigrationRequirements, RepositoryAnalysis, ServiceRecommendation,MigrationStrategyResult
 
 
@@ -57,7 +57,7 @@ def groq_model() -> str:
 
 
 def is_groq_configured() -> bool:
-    return bool(GROQ_API_KEY)
+    return bool(_groq_api_keys())
 
 
 def analyze_repository_evidence(
@@ -796,8 +796,8 @@ def _chat_completion(
     response_format: dict[str, str] | None,
     label: str = "chat",
 ) -> str:
-    api_key = GROQ_API_KEY
-    if not api_key:
+    api_keys = _groq_api_keys()
+    if not api_keys:
         return fallback
 
     payload = {
@@ -809,58 +809,81 @@ def _chat_completion(
     if response_format:
         payload["response_format"] = response_format
 
-    try:
+    for index, api_key in enumerate(api_keys, start=1):
+        key_label = "primary" if index == 1 else f"fallback-{index}"
+
         print(
             "Calling Groq:",
             f"label={label}",
+            f"key={key_label}",
             f"model={payload.get('model')}",
             f"endpoint={GROQ_ENDPOINT}",
         )
-        with httpx.Client(timeout=90) as client:
-            response = client.post(
-                GROQ_ENDPOINT,
-                headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-                json=payload,
-            )
-            response.raise_for_status()
-            data = response.json()
-            content = data["choices"][0]["message"]["content"].strip()
-            if not content:
-                print(
-                    "Groq returned an empty message content.",
-                    f"label={label}",
-                    f"model={payload.get('model')}",
-                    f"endpoint={GROQ_ENDPOINT}",
+
+        try:
+            with httpx.Client(timeout=90) as client:
+                response = client.post(
+                    GROQ_ENDPOINT,
+                    headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+                    json=payload,
                 )
-            else:
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"].strip()
+                if not content:
+                    print(
+                        "Groq returned an empty message content.",
+                        f"label={label}",
+                        f"key={key_label}",
+                        f"model={payload.get('model')}",
+                        f"endpoint={GROQ_ENDPOINT}",
+                    )
+                    continue
+
                 print(
                     "Groq response received:",
                     f"label={label}",
+                    f"key={key_label}",
                     f"chars={len(content)}",
                     f"preview={_safe_preview(content)}",
                 )
-            return content or fallback
-    except httpx.HTTPStatusError as exc:
-        response_text = exc.response.text if exc.response is not None else ""
-        print(
-            "Groq API request failed:",
-            f"label={label}",
-            f"status={exc.response.status_code if exc.response is not None else 'unknown'}",
-            f"model={payload.get('model')}",
-            f"endpoint={GROQ_ENDPOINT}",
-            f"response={_safe_preview(response_text)}",
-        )
-        return fallback
-    except Exception as exc:
-        print(
-            "Groq API request failed:",
-            f"label={label}",
-            f"type={type(exc).__name__}",
-            f"model={payload.get('model')}",
-            f"endpoint={GROQ_ENDPOINT}",
-            f"error={exc}",
-        )
-        return fallback
+                return content
+        except httpx.HTTPStatusError as exc:
+            response_text = exc.response.text if exc.response is not None else ""
+            print(
+                "Groq API request failed:",
+                f"label={label}",
+                f"key={key_label}",
+                f"status={exc.response.status_code if exc.response is not None else 'unknown'}",
+                f"model={payload.get('model')}",
+                f"endpoint={GROQ_ENDPOINT}",
+                f"response={_safe_preview(response_text)}",
+            )
+        except Exception as exc:
+            print(
+                "Groq API request failed:",
+                f"label={label}",
+                f"key={key_label}",
+                f"type={type(exc).__name__}",
+                f"model={payload.get('model')}",
+                f"endpoint={GROQ_ENDPOINT}",
+                f"error={exc}",
+            )
+
+    print(
+        "All configured Groq keys failed. Returning fallback.",
+        f"label={label}",
+        f"configured_keys={len(api_keys)}",
+    )
+    return fallback
+
+
+def _groq_api_keys() -> list[str]:
+    keys: list[str] = []
+    for api_key in (GROQ_API_KEY, GROQ_API_KEY_2):
+        if api_key and api_key not in keys:
+            keys.append(api_key)
+    return keys
 
 
 def _json_payload(content: str) -> str:

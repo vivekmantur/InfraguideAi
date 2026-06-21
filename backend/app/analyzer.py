@@ -528,7 +528,13 @@ def _infer_repository_analysis(detected_files: list[str], evidence: list[dict[st
         ])
         else "Application"
     )
-    dependency_graph = [f"Application -> {item}" for item in frameworks + runtimes + databases + package_managers + cloud_dependencies + external_dependencies]
+    dependency_graph = _build_dependency_graph(
+        frameworks,
+        runtimes,
+        databases,
+        cloud_dependencies,
+        external_dependencies,
+    )
 
     return RepositoryAnalysis(
         project_summary=_project_summary(application_type, architecture_pattern, languages, frameworks, runtimes, databases, package_managers, containers),
@@ -577,6 +583,11 @@ def _merge_analysis(
             if value not in (None, "", "Unknown"):
                 data[key] = value
 
+    data["dependency_graph"] = _sanitize_dependency_graph(
+        data.get("dependency_graph") or [],
+        data.get("package_managers") or [],
+    )
+
     return RepositoryAnalysis.model_validate(data)
 
 
@@ -587,6 +598,33 @@ def _append_if(items: list[str], condition: bool, value: str) -> None:
 
 def _dedupe(items: list[str]) -> list[str]:
     return list(dict.fromkeys(item for item in items if item))
+
+
+def _build_dependency_graph(
+    frameworks: list[str],
+    runtimes: list[str],
+    databases: list[str],
+    cloud_dependencies: list[str],
+    external_dependencies: list[str],
+) -> list[str]:
+    dependency_targets = frameworks + runtimes + databases + cloud_dependencies + external_dependencies
+    return [f"Application -> {item}" for item in _dedupe(dependency_targets)]
+
+
+def _sanitize_dependency_graph(
+    dependency_graph: list[str],
+    package_managers: list[str],
+) -> list[str]:
+    package_manager_names = {item.strip().lower() for item in package_managers}
+    sanitized: list[str] = []
+
+    for dependency in dependency_graph:
+        target = dependency.split("->")[-1].strip().lower()
+        if target in package_manager_names:
+            continue
+        sanitized.append(dependency)
+
+    return _dedupe(sanitized)
 
 
 def _architecture_pattern(frameworks: list[str], databases: list[str]) -> str:
